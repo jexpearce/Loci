@@ -25,7 +25,7 @@ class Session {
 }
 
 @Model
-class ListeningEvent {
+final class ListeningEvent {
     @Attribute(.unique) var id: UUID = UUID()
     var timestamp: Date
     var latitude: Double
@@ -37,7 +37,7 @@ class ListeningEvent {
     var genre: String?
     var spotifyTrackId: String
 
-    @Backlink(from: \Session.events) var session: [Session]
+    //@Backlink(from: \Session.events) var session: [Session]
 
     init(timestamp: Date,
          latitude: Double,
@@ -164,7 +164,7 @@ extension ListeningEvent: Codable {
         try container.encode(spotifyTrackId, forKey: .spotifyTrackId)
     }
     
-    init(from decoder: Decoder) throws {
+    convenience init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let id = try container.decode(UUID.self, forKey: .id)
         let timestamp = try container.decode(Date.self, forKey: .timestamp)

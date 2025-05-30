@@ -50,7 +50,7 @@ class AnalyticsEngine: ObservableObject {
                 topGenre: nil,
                 locationBreakdown: [:],
                 genreDistribution: [:],
-                timeDistribution: TimeDistribution(),
+                timeDistribution: TimeDistribution(morning: 0, afternoon: 0, evening: 0, lateNight: 0),
                 diversityScore: 0
             )
         }
@@ -123,7 +123,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Building Analytics
     
-    func getBuildingChart(for building: String, timeRange: TimeRange = .today) -> BuildingChart {
+    @MainActor func getBuildingChart(for building: String, timeRange: TimeRange = .today) -> BuildingChart {
         let cacheKey = "\(building)-\(timeRange.rawValue)"
         
         if let cached = analyticsCache.getChart(key: cacheKey) {
@@ -136,6 +136,19 @@ class AnalyticsEngine: ObservableObject {
         
         analyticsCache.storeChart(chart, key: cacheKey)
         return chart
+    }
+    private func generateBuildingChart(building: String, events: [ListeningEvent]) -> BuildingChart {
+        // PLACEHOLDER TO DO!!
+        return BuildingChart(
+            buildingName: building,
+            lastUpdated: Date(),
+            topArtists: [],
+            topTracks: [],
+            topGenres: [],
+            totalListeners: 0,
+            totalPlays: events.count,
+            peakHours: []
+        )
     }
     
     private func updateBuildingMetrics(for event: ListeningEvent) {
@@ -174,7 +187,7 @@ class AnalyticsEngine: ObservableObject {
         
         buildingCharts[building] = chart
     }
-    func generateBuildingStats(for building: String, timeRange: TimeRange = .today) -> BuildingStats {
+    @MainActor func generateBuildingStats(for building: String, timeRange: TimeRange = .today) -> BuildingStats {
         let events = filterEvents(building: building, timeRange: timeRange)
         
         // User activity
@@ -229,7 +242,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Trend Detection
 
-    func detectTrends(timeRange: TimeRange = .today) -> TrendReport {
+    @MainActor func detectTrends(timeRange: TimeRange = .today) -> TrendReport {
         let currentEvents = filterEvents(timeRange: timeRange)
         let previousEvents = filterEvents(timeRange: previousTimeRange(for: timeRange))
         
@@ -263,8 +276,8 @@ class AnalyticsEngine: ObservableObject {
         
         // Rising genres
         let risingGenres = findRisingItems(
-            current: Dictionary(grouping: currentEvents.compactMap { $0.genre }) { $0 },
-            previous: Dictionary(grouping: previousEvents.compactMap { $0.genre }) { $0 }
+            current: Dictionary(grouping: currentEvents) { $0.genre ?? "Unknown" },
+            previous: Dictionary(grouping: previousEvents) { $0.genre ?? "Unknown" }
         ).map { genre, growth in
             TrendingItem(
                 name: genre,
@@ -475,7 +488,7 @@ class AnalyticsEngine: ObservableObject {
         var artistFrequency = [String: Double]()
         var genreFrequency = [String: Double]()
         var locationFrequency = [String: Double]()
-        var timePatterns = [Int: Double]() // Hour -> frequency
+        var timePatterns = [String: Double]()
         
         let total = Double(events.count)
         
@@ -489,7 +502,8 @@ class AnalyticsEngine: ObservableObject {
             }
             
             let hour = Calendar.current.component(.hour, from: event.timestamp)
-            timePatterns[hour, default: 0] += 1 / total
+            let hourString = String(hour)
+            timePatterns[hourString, default: 0] += 1 / total
         }
         
         return ListeningFingerprint(
@@ -505,7 +519,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Leaderboard Generation
     
-    func generateLeaderboards(for building: String, timeRange: TimeRange) -> BuildingLeaderboards {
+    @MainActor func generateLeaderboards(for building: String, timeRange: TimeRange) -> BuildingLeaderboards {
         let events = filterEvents(building: building, timeRange: timeRange)
         
         // Most active listeners (by play count)
@@ -540,7 +554,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Helper Methods
     
-    private func filterEvents(building: String? = nil, timeRange: TimeRange) -> [ListeningEvent] {
+    @MainActor private func filterEvents(building: String? = nil, timeRange: TimeRange) -> [ListeningEvent] {
         let cutoffDate = timeRange.startDate
         
         return dataStore.currentSessionEvents.filter { event in
@@ -695,21 +709,21 @@ struct BuildingChart {
     }
 }
 
-struct ArtistRanking {
+struct ArtistRanking: Codable {
     let artistName: String
     var playCount: Int
     var uniqueTracks: Int
     var lastPlayed: Date
 }
 
-struct TrackRanking {
+struct TrackRanking: Codable {
     let trackName: String
     let artistName: String
     var playCount: Int
     var lastPlayed: Date
 }
 
-struct GenreRanking {
+struct GenreRanking: Codable {
     let genre: String
     var playCount: Int
     var percentage: Double
@@ -758,19 +772,19 @@ struct BuildingLeaderboards {
     let lastUpdated: Date
 }
 
-struct ListenerRanking {
+struct ListenerRanking: Codable {
     let userId: String
     let playCount: Int
     let badge: String
 }
 
-struct GenreChampion {
+struct GenreChampion: Codable {
     let genre: String
     let userId: String
     let playCount: Int
 }
 
-enum TimeRange: String {
+enum TimeRange: String, Codable {
     case today = "today"
     case thisWeek = "week"
     case thisMonth = "month"
@@ -791,7 +805,7 @@ enum TimeRange: String {
     }
 }
 
-enum TimeOfDay {
+enum TimeOfDay: String, Codable {
     case earlyMorning // 5-8
     case morning      // 8-12
     case afternoon    // 12-17
@@ -860,7 +874,7 @@ struct GenreCount {
     let count: Int
 }
 
-struct TrendReport {
+struct TrendReport: Codable {
     let timeRange: TimeRange
     let generatedAt: Date
     let risingArtists: [TrendingItem]
@@ -869,7 +883,7 @@ struct TrendReport {
     let hotLocations: [HotLocation]
 }
 
-struct TrendingItem {
+struct TrendingItem: Codable {
     let name: String
     let type: TrendType
     let growthRate: Double
@@ -877,11 +891,11 @@ struct TrendingItem {
     let rank: Int
 }
 
-enum TrendType {
+enum TrendType: String, Codable {
     case artist, track, genre
 }
 
-struct HotLocation {
+struct HotLocation: Codable {
     let buildingName: String
     let activityLevel: Double
     let uniqueListeners: Int

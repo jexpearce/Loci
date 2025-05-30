@@ -8,12 +8,12 @@ final class BackgroundTaskManager {
 
     /// Begins a new background task and returns its identifier.
     func beginTask(_ name: String = "LociTracking") -> UIBackgroundTaskIdentifier {
-        let id = UIApplication.shared.beginBackgroundTask(withName: name) {
-            // expiration handler: end the task if time expires
-            self.endTask(id)
+        var taskId: UIBackgroundTaskIdentifier = .invalid
+        taskId = UIApplication.shared.beginBackgroundTask(withName: name) {
+            self.endTask(taskId)
         }
-        tasks.append(id)
-        return id
+        tasks.append(taskId)
+        return taskId
     }
 
     /// Ends the given background task.

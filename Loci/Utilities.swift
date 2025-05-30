@@ -1,4 +1,5 @@
 import CryptoKit
+import Foundation
 
 /// 1) Create a random code verifier (43–128 characters)
 func generateCodeVerifier() -> String {

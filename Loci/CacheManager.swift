@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 import UIKit
 
 // MARK: - Cache Configuration

@@ -148,7 +148,9 @@ class SessionManager: ObservableObject {
                         )
 
                         // Persist + analytics
-                        self.dataStore.addEvent(event)
+                        Task { @MainActor in
+                            self.dataStore.addEvent(event)
+                        }
                         AnalyticsEngine.shared.processNewEvent(event)
 
                         print("✅ Logged: \(track.name) by \(track.artist) at \(building ?? "Unknown location")")

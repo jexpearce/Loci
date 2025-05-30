@@ -8,7 +8,7 @@
 import Foundation
 import CoreLocation
 
-class MatchingEngine {
+class MatchingEngine: ObservableObject {
     static let shared = MatchingEngine()
     
     private let analyticsEngine = AnalyticsEngine.shared
@@ -266,7 +266,7 @@ class MatchingEngine {
 
 // MARK: - Supporting Types
 
-struct Match {
+struct Match: Codable{
     let userId: UUID
     var score: MatchScore
     let matchType: MatchType
@@ -274,7 +274,7 @@ struct Match {
     let timestamp: Date
 }
 
-struct MatchScore {
+struct MatchScore: Codable {
     var overall: Double
     let musicTaste: Double
     let locationOverlap: Double
@@ -282,7 +282,7 @@ struct MatchScore {
     let diversityMatch: Double
 }
 
-enum MatchType {
+enum MatchType: String, Codable {
     case strong       // High overall match
     case musicTwin    // Very similar music taste
     case neighbor     // Same locations frequently
@@ -300,7 +300,7 @@ enum MatchType {
     }
 }
 
-struct SharedInterests {
+struct SharedInterests: Codable {
     let topSharedArtists: [String]
     let topSharedGenres: [String]
     let sharedListeningTimes: [TimeOfDay]

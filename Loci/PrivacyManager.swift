@@ -216,19 +216,27 @@ class PrivacyManager: ObservableObject {
     
     // MARK: - Data Export
     
-    func exportUserData() -> ExportedUserData {
+    @MainActor func exportUserData() -> ExportedUserData {
         let dataStore = DataStore.shared
         
         return ExportedUserData(
             userID: userID,
             exportDate: Date(),
-            sessions: dataStore.sessionHistory,
+            sessions: dataStore.sessionHistory.map { session in
+                SessionData(
+                    id: session.id,
+                    startTime: session.startTime,
+                    endTime: session.endTime,
+                    duration: session.duration,
+                    events: session.events
+                )
+            },
             privacySettings: privacySettings,
             sharingPreferences: sharingPreferences
         )
     }
     
-    func deleteAllUserData() {
+    @MainActor func deleteAllUserData() {
         // Clear all stored data
         DataStore.shared.clearAllData()
         

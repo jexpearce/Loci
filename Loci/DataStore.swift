@@ -13,8 +13,10 @@ class DataStore: ObservableObject {
     @Published var sessionHistory: [Session] = []
 
     private init() {
-        let schema = ModelSchema([Session.self, ListeningEvent.self])
-        self.container = ModelContainer(schema: schema)
+        self.container = try! ModelContainer(
+            for: Session.self, ListeningEvent.self
+        )
+        
         fetchSessionHistory()
     }
 
@@ -67,18 +69,27 @@ class DataStore: ObservableObject {
 
     private func fetchSessionHistory() {
         Task { @MainActor in
-            let query = Query<Session>().sorted(by: \Session.startTime, order: .descending)
-            sessionHistory = (try? container.mainContext.fetch(query)) ?? []
+            let descriptor = FetchDescriptor<Session>(
+                sortBy: [SortDescriptor(\Session.startTime, order: .reverse)]
+            )
+            sessionHistory = (try? container.mainContext.fetch(descriptor)) ?? []
         }
     }
 
     // MARK: - Export Utilities
 
     func exportSessionAsJSON(_ session: Session) -> Data? {
+        let sessionData = SessionData(
+            id: session.id,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            duration: session.duration,
+            events: session.events
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         encoder.dateEncodingStrategy = .iso8601
-        return try? encoder.encode(session)
+        return try? encoder.encode(sessionData)
     }
 
     func exportSessionAsCSV(_ session: Session) -> String {

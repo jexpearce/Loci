@@ -269,7 +269,13 @@ struct SessionHistoryView: View {
                     ScrollView {
                         LazyVStack(spacing: 16) {
                             ForEach(dataStore.sessionHistory) { session in
-                                SessionHistoryCard(session: session)
+                                SessionHistoryCard(session: SessionData(
+                                    id: session.id,
+                                    startTime: session.startTime,
+                                    endTime: session.endTime,
+                                    duration: session.duration,
+                                    events: session.events
+                                ))
                             }
                         }
                         .padding()
