@@ -47,6 +47,23 @@ class DataStore: ObservableObject {
             clearCurrentSession()
         }
     }
+    
+    /// Save a SessionData to persistent storage by converting it to a Session model
+    func saveSession(_ sessionData: SessionData) {
+        Task { @MainActor in
+            let session = Session(
+                startTime: sessionData.startTime,
+                endTime: sessionData.endTime,
+                duration: sessionData.duration,
+                events: sessionData.events
+            )
+            session.id = sessionData.id
+            container.mainContext.insert(session)
+            try? container.mainContext.save()
+            sessionHistory.insert(session, at: 0)
+            clearCurrentSession()
+        }
+    }
 
     private func fetchSessionHistory() {
         Task { @MainActor in
