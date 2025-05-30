@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import BackgroundTasks
 import UIKit
+import CoreLocation        
+import GeocodingService
+
 
 class SessionManager: ObservableObject {
     static let shared = SessionManager()
@@ -107,67 +110,56 @@ class SessionManager: ObservableObject {
     
     private func performLocationUpdate() {
         // Start background task to ensure we complete our work
-        beginBackgroundTask()
+
+        let bgTaskID = BackgroundTaskManager.shared.beginTask("com.loci.sessionUpdate")
+        defer { BackgroundTaskManager.shared.endTask(bgTaskID) }
+
+
+          // Get current location
+          guard let location = locationManager.currentLocation else {
+              print("❌ No location available")
+                    return
+                }
         
         print("📍 Performing location update at \(Date().formatted(date: .omitted, time: .standard))")
         
-        // Get current location
-        guard let location = locationManager.currentLocation else {
-            print("❌ No location available")
-            endBackgroundTask()
-            return
-        }
-        
-        // Reverse geocode to get building
-        locationManager.reverseGeocode(location: location) { [weak self] building in
-            guard let self = self else { return }
-            
-            // Get current Spotify track
-            self.spotifyManager.getCurrentTrack { track in
-                if let track = track {
-                    // Create listening event
-                    let event = ListeningEvent(
-                        id: UUID(),
-                        timestamp: Date(),
-                        latitude: location.coordinate.latitude,
-                        longitude: location.coordinate.longitude,
-                        buildingName: building,
-                        trackName: track.name,
-                        artistName: track.artist,
-                        albumName: track.album,
-                        genre: track.genre,
-                        spotifyTrackId: track.id
-                    )
-                    
-                    // Store event
-                    self.dataStore.addEvent(event)
-                    
-                    AnalyticsEngine.shared.processNewEvent(event)
-                    
-                    print("✅ Logged: \(track.name) by \(track.artist) at \(building ?? "Unknown location")")
+        Task { [weak self] in
+                guard let self = self else { return }
+
+                // Turn CoreLocation into a CLPlacemark lookup
+                let clLocation = CLLocation(
+                    latitude: location.coordinate.latitude,
+                    longitude: location.coordinate.longitude
+                )
+                let building = await GeocodingService.shared.reverseGeocode(clLocation)
+
+                // Now fetch Spotify
+                self.spotifyManager.getCurrentTrack { track in
+                    if let track = track {
+                        let event = ListeningEvent(
+                            id: UUID(),
+                            timestamp: Date(),
+                            latitude: location.coordinate.latitude,
+                            longitude: location.coordinate.longitude,
+                            buildingName: building,
+                            trackName: track.name,
+                            artistName: track.artist,
+                            albumName: track.album,
+                            genre: track.genre,
+                            spotifyTrackId: track.id
+                        )
+
+                        // Persist + analytics
+                        self.dataStore.addEvent(event)
+                        AnalyticsEngine.shared.processNewEvent(event)
+
+                        print("✅ Logged: \(track.name) by \(track.artist) at \(building ?? "Unknown location")")
+                    }
+                    // no need to explicitly end—our defer up top handles it
                 }
-                
-                // End background task
-                self.endBackgroundTask()
             }
-        }
     }
     
-    // MARK: - Background Task Management
-    
-    private func beginBackgroundTask() {
-        backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
-            // If we're running out of time, end the task
-            self?.endBackgroundTask()
-        }
-    }
-    
-    private func endBackgroundTask() {
-        if backgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
-        }
-    }
     
     // MARK: - Background Tasks Setup
     

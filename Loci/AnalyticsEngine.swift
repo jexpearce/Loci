@@ -34,6 +34,93 @@ class AnalyticsEngine: ObservableObject {
         updateTimePatterns(for: event)
     }
     
+    // MARK: - Session Analytics
+        
+    func generateSessionAnalytics(for events: [ListeningEvent]) -> SessionAnalytics {
+        guard !events.isEmpty else {
+            return SessionAnalytics(
+                sessionId: UUID(),
+                totalTracks: 0,
+                uniqueTracks: 0,
+                uniqueArtists: 0,
+                uniqueLocations: 0,
+                totalDuration: 0,
+                topArtist: nil,
+                topTrack: nil,
+                topGenre: nil,
+                locationBreakdown: [:],
+                genreDistribution: [:],
+                timeDistribution: TimeDistribution(),
+                diversityScore: 0
+            )
+        }
+        
+        // Basic counts
+        let uniqueTracks = Set(events.map { $0.trackName }).count
+        let uniqueArtists = Set(events.map { $0.artistName }).count
+        let uniqueLocations = Set(events.compactMap { $0.buildingName }).count
+        
+        // Duration calculation (90 seconds per event)
+        let totalDuration = events.count * 90
+        
+        // Top items
+        let artistCounts = Dictionary(grouping: events) { $0.artistName }
+            .mapValues { $0.count }
+        let topArtist = artistCounts.max { $0.value < $1.value }?.key
+        
+        let trackCounts = Dictionary(grouping: events) { $0.trackName }
+            .mapValues { $0.count }
+        let topTrack = trackCounts.max { $0.value < $1.value }?.key
+        
+        let genreCounts = Dictionary(grouping: events.compactMap { $0.genre }) { $0 }
+            .mapValues { $0.count }
+        let topGenre = genreCounts.max { $0.value < $1.value }?.key
+        
+        // Location breakdown
+        let locationBreakdown = Dictionary(grouping: events) { $0.buildingName ?? "Unknown" }
+            .mapValues { events in
+                LocationStats(
+                    totalPlays: events.count,
+                    uniqueTracks: Set(events.map { $0.trackName }).count,
+                    topArtist: Dictionary(grouping: events) { $0.artistName }
+                        .max { $0.value.count < $1.value.count }?.key,
+                    timeSpent: events.count * 90
+                )
+            }
+        
+        // Genre distribution (percentages)
+        let totalGenreEvents = events.compactMap { $0.genre }.count
+        let genreDistribution = genreCounts.mapValues { count in
+            Double(count) / Double(totalGenreEvents)
+        }
+        
+        // Time distribution
+        let timeDistribution = calculateTimeDistribution(from: events)
+        
+        // Diversity score (0-1, based on Shannon entropy)
+        let diversityScore = calculateSessionDiversity(
+            tracks: trackCounts,
+            artists: artistCounts,
+            genres: genreCounts
+        )
+        
+        return SessionAnalytics(
+            sessionId: UUID(),
+            totalTracks: events.count,
+            uniqueTracks: uniqueTracks,
+            uniqueArtists: uniqueArtists,
+            uniqueLocations: uniqueLocations,
+            totalDuration: totalDuration,
+            topArtist: topArtist,
+            topTrack: topTrack,
+            topGenre: topGenre,
+            locationBreakdown: locationBreakdown,
+            genreDistribution: genreDistribution,
+            timeDistribution: timeDistribution,
+            diversityScore: diversityScore
+        )
+    }
+    
     // MARK: - Building Analytics
     
     func getBuildingChart(for building: String, timeRange: TimeRange = .today) -> BuildingChart {
@@ -87,6 +174,223 @@ class AnalyticsEngine: ObservableObject {
         
         buildingCharts[building] = chart
     }
+    func generateBuildingStats(for building: String, timeRange: TimeRange = .today) -> BuildingStats {
+        let events = filterEvents(building: building, timeRange: timeRange)
+        
+        // User activity
+        let activeUsers = Set(events.map { _ in "Anonymous" }).count // In production, use actual user IDs
+        
+        // Track variety
+        let uniqueTracks = Set(events.map { $0.trackName }).count
+        let uniqueArtists = Set(events.map { $0.artistName }).count
+        
+        // Genre breakdown
+        let genreBreakdown = Dictionary(grouping: events.compactMap { $0.genre }) { $0 }
+            .mapValues { $0.count }
+            .sorted { $0.value > $1.value }
+            .prefix(5)
+            .map { GenreCount(genre: $0.key, count: $0.value) }
+        
+        // Hourly activity
+        let hourlyActivity = Dictionary(grouping: events) { event in
+            Calendar.current.component(.hour, from: event.timestamp)
+        }.mapValues { $0.count }
+        
+        // Peak hours (top 3)
+        let peakHours = hourlyActivity
+            .sorted { $0.value > $1.value }
+            .prefix(3)
+            .map { $0.key }
+        
+        // Recent trend (compare to previous period)
+        let previousPeriodEvents = filterEvents(
+            building: building,
+            timeRange: previousTimeRange(for: timeRange)
+        )
+        let growthRate = calculateGrowthRate(
+            current: events.count,
+            previous: previousPeriodEvents.count
+        )
+        
+        return BuildingStats(
+            buildingName: building,
+            timeRange: timeRange,
+            totalPlays: events.count,
+            activeUsers: activeUsers,
+            uniqueTracks: uniqueTracks,
+            uniqueArtists: uniqueArtists,
+            genreBreakdown: genreBreakdown,
+            hourlyActivity: hourlyActivity,
+            peakHours: peakHours,
+            growthRate: growthRate,
+            lastUpdated: Date()
+        )
+    }
+    
+    // MARK: - Trend Detection
+
+    func detectTrends(timeRange: TimeRange = .today) -> TrendReport {
+        let currentEvents = filterEvents(timeRange: timeRange)
+        let previousEvents = filterEvents(timeRange: previousTimeRange(for: timeRange))
+        
+        // Rising artists
+        let risingArtists = findRisingItems(
+            current: Dictionary(grouping: currentEvents) { $0.artistName },
+            previous: Dictionary(grouping: previousEvents) { $0.artistName }
+        ).map { artist, growth in
+            TrendingItem(
+                name: artist,
+                type: .artist,
+                growthRate: growth,
+                playCount: currentEvents.filter { $0.artistName == artist }.count,
+                rank: 0 // Will be set after sorting
+            )
+        }
+        
+        // Rising tracks
+        let risingTracks = findRisingItems(
+            current: Dictionary(grouping: currentEvents) { $0.trackName },
+            previous: Dictionary(grouping: previousEvents) { $0.trackName }
+        ).map { track, growth in
+            TrendingItem(
+                name: track,
+                type: .track,
+                growthRate: growth,
+                playCount: currentEvents.filter { $0.trackName == track }.count,
+                rank: 0
+            )
+        }
+        
+        // Rising genres
+        let risingGenres = findRisingItems(
+            current: Dictionary(grouping: currentEvents.compactMap { $0.genre }) { $0 },
+            previous: Dictionary(grouping: previousEvents.compactMap { $0.genre }) { $0 }
+        ).map { genre, growth in
+            TrendingItem(
+                name: genre,
+                type: .genre,
+                growthRate: growth,
+                playCount: currentEvents.filter { $0.genre == genre }.count,
+                rank: 0
+            )
+        }
+        
+        // Hot locations
+        let hotLocations = Dictionary(grouping: currentEvents) { $0.buildingName ?? "Unknown" }
+            .mapValues { $0.count }
+            .sorted { $0.value > $1.value }
+            .prefix(10)
+            .enumerated()
+            .map { index, location in
+                HotLocation(
+                    buildingName: location.key,
+                    activityLevel: Double(location.value) / Double(currentEvents.count),
+                    uniqueListeners: 1, // Placeholder
+                    rank: index + 1
+                )
+            }
+        
+        return TrendReport(
+            timeRange: timeRange,
+            generatedAt: Date(),
+            risingArtists: Array(risingArtists.sorted { $0.growthRate > $1.growthRate }.prefix(10)),
+            risingTracks: Array(risingTracks.sorted { $0.growthRate > $1.growthRate }.prefix(10)),
+            risingGenres: Array(risingGenres.sorted { $0.growthRate > $1.growthRate }.prefix(5)),
+            hotLocations: Array(hotLocations)
+        )
+    }
+
+    // MARK: - Helper Methods for Analytics
+
+    private func calculateTimeDistribution(from events: [ListeningEvent]) -> TimeDistribution {
+        let calendar = Calendar.current
+        
+        var morning = 0     // 6-12
+        var afternoon = 0   // 12-18
+        var evening = 0     // 18-24
+        var lateNight = 0   // 0-6
+        
+        for event in events {
+            let hour = calendar.component(.hour, from: event.timestamp)
+            switch hour {
+            case 6..<12: morning += 1
+            case 12..<18: afternoon += 1
+            case 18..<24: evening += 1
+            default: lateNight += 1
+            }
+        }
+        
+        let total = Double(events.count)
+        return TimeDistribution(
+            morning: total > 0 ? Double(morning) / total : 0,
+            afternoon: total > 0 ? Double(afternoon) / total : 0,
+            evening: total > 0 ? Double(evening) / total : 0,
+            lateNight: total > 0 ? Double(lateNight) / total : 0
+        )
+    }
+
+    private func calculateSessionDiversity(tracks: [String: Int], artists: [String: Int], genres: [String: Int]) -> Double {
+        // Weighted diversity score
+        let trackDiversity = calculateShannonDiversity(tracks)
+        let artistDiversity = calculateShannonDiversity(artists)
+        let genreDiversity = calculateShannonDiversity(genres)
+        
+        // Weighted average (tracks matter most for diversity)
+        return (trackDiversity * 0.5) + (artistDiversity * 0.3) + (genreDiversity * 0.2)
+    }
+
+    private func calculateShannonDiversity(_ counts: [String: Int]) -> Double {
+        guard !counts.isEmpty else { return 0 }
+        
+        let total = Double(counts.values.reduce(0, +))
+        guard total > 0 else { return 0 }
+        
+        let entropy = counts.values.reduce(0.0) { sum, count in
+            let p = Double(count) / total
+            return sum - (p * log2(p))
+        }
+        
+        // Normalize to 0-1 range
+        let maxEntropy = log2(Double(counts.count))
+        return maxEntropy > 0 ? entropy / maxEntropy : 0
+    }
+
+    private func findRisingItems(current: [String: [ListeningEvent]], previous: [String: [ListeningEvent]]) -> [(String, Double)] {
+        var risingItems: [(String, Double)] = []
+        
+        for (item, currentEvents) in current {
+            let currentCount = currentEvents.count
+            let previousCount = previous[item]?.count ?? 0
+            
+            // Calculate growth rate
+            let growth = calculateGrowthRate(current: currentCount, previous: previousCount)
+            
+            // Only include items with positive growth and minimum threshold
+            if growth > 0 && currentCount >= 3 {
+                risingItems.append((item, growth))
+            }
+        }
+        
+        return risingItems.sorted { $0.1 > $1.1 }
+    }
+
+    private func calculateGrowthRate(current: Int, previous: Int) -> Double {
+        guard previous > 0 else {
+            return current > 0 ? 1.0 : 0.0
+        }
+        return Double(current - previous) / Double(previous)
+    }
+
+    private func previousTimeRange(for timeRange: TimeRange) -> TimeRange {
+        // For trend comparison - this is simplified
+        switch timeRange {
+        case .today: return .today // Would be yesterday in production
+        case .thisWeek: return .thisWeek // Would be last week
+        case .thisMonth: return .thisMonth // Would be last month
+        case .allTime: return .allTime
+        }
+    }
+
     
     // MARK: - Location Clustering
     
@@ -503,4 +807,83 @@ enum TimeOfDay {
         default: return .lateNight
         }
     }
+}
+
+// MARK: - New Supporting Types (add these to the bottom of AnalyticsEngine.swift)
+
+struct SessionAnalytics {
+    let sessionId: UUID
+    let totalTracks: Int
+    let uniqueTracks: Int
+    let uniqueArtists: Int
+    let uniqueLocations: Int
+    let totalDuration: Int // seconds
+    let topArtist: String?
+    let topTrack: String?
+    let topGenre: String?
+    let locationBreakdown: [String: LocationStats]
+    let genreDistribution: [String: Double] // percentages
+    let timeDistribution: TimeDistribution
+    let diversityScore: Double // 0-1
+}
+
+struct LocationStats {
+    let totalPlays: Int
+    let uniqueTracks: Int
+    let topArtist: String?
+    let timeSpent: Int // seconds
+}
+
+struct TimeDistribution {
+    let morning: Double    // 6-12
+    let afternoon: Double  // 12-18
+    let evening: Double    // 18-24
+    let lateNight: Double  // 0-6
+}
+
+struct BuildingStats {
+    let buildingName: String
+    let timeRange: TimeRange
+    let totalPlays: Int
+    let activeUsers: Int
+    let uniqueTracks: Int
+    let uniqueArtists: Int
+    let genreBreakdown: [GenreCount]
+    let hourlyActivity: [Int: Int]
+    let peakHours: [Int]
+    let growthRate: Double
+    let lastUpdated: Date
+}
+
+struct GenreCount {
+    let genre: String
+    let count: Int
+}
+
+struct TrendReport {
+    let timeRange: TimeRange
+    let generatedAt: Date
+    let risingArtists: [TrendingItem]
+    let risingTracks: [TrendingItem]
+    let risingGenres: [TrendingItem]
+    let hotLocations: [HotLocation]
+}
+
+struct TrendingItem {
+    let name: String
+    let type: TrendType
+    let growthRate: Double
+    let playCount: Int
+    let rank: Int
+}
+
+enum TrendType {
+    case artist, track, genre
+}
+
+struct HotLocation {
+    let buildingName: String
+    let activityLevel: Double
+    let uniqueListeners: Int
+    let rank: Int
 }
