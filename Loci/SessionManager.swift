@@ -2,8 +2,7 @@ import Foundation
 import Combine
 import BackgroundTasks
 import UIKit
-import CoreLocation        
-import GeocodingService
+import CoreLocation
 
 
 class SessionManager: ObservableObject {
@@ -33,7 +32,7 @@ class SessionManager: ObservableObject {
     
     // MARK: - Session Control
     
-    func startSession(duration: SessionDuration) {
+    @MainActor func startSession(duration: SessionDuration) {
         print("🎵 Starting session for \(duration.displayText)")
         
         isSessionActive = true
@@ -59,7 +58,7 @@ class SessionManager: ObservableObject {
         logEvent(type: .sessionStart)
     }
     
-    func stopSession() {
+    @MainActor func stopSession() {
         print("🛑 Stopping session")
         
         isSessionActive = false
@@ -82,7 +81,9 @@ class SessionManager: ObservableObject {
                 duration: currentSessionDuration,
                 events: dataStore.currentSessionEvents
             )
-            dataStore.saveSession(session)
+            Task { @MainActor in
+                    dataStore.saveSession(session)
+                }
         }
         
         // Log session end
@@ -92,8 +93,6 @@ class SessionManager: ObservableObject {
         sessionStartTime = nil
         sessionEndTime = nil
         
-        // End any active background task
-        endBackgroundTask()
     }
     
     // MARK: - Location Update Cycle
@@ -137,7 +136,6 @@ class SessionManager: ObservableObject {
                 self.spotifyManager.getCurrentTrack { track in
                     if let track = track {
                         let event = ListeningEvent(
-                            id: UUID(),
                             timestamp: Date(),
                             latitude: location.coordinate.latitude,
                             longitude: location.coordinate.longitude,
@@ -216,7 +214,7 @@ class SessionManager: ObservableObject {
     
     // MARK: - Logging
     
-    private func logEvent(type: SessionEventType) {
+    @MainActor private func logEvent(type: SessionEventType) {
         let logMessage: String
         switch type {
         case .sessionStart:
@@ -240,38 +238,4 @@ enum SessionEventType {
     case sessionEnd
     case locationUpdate
     case spotifyUpdate
-}
-
-enum SessionDuration: CaseIterable {
-    case thirtyMinutes
-    case oneHour
-    case twoHours
-    case fourHours
-    case eightHours
-    case twelveHours
-    case sixteenHours
-    
-    var displayText: String {
-        switch self {
-        case .thirtyMinutes: return "30 min"
-        case .oneHour: return "1 hr"
-        case .twoHours: return "2 hrs"
-        case .fourHours: return "4 hrs"
-        case .eightHours: return "8 hrs"
-        case .twelveHours: return "12 hrs"
-        case .sixteenHours: return "16 hrs"
-        }
-    }
-    
-    var timeInterval: TimeInterval {
-        switch self {
-        case .thirtyMinutes: return 30 * 60
-        case .oneHour: return 60 * 60
-        case .twoHours: return 2 * 60 * 60
-        case .fourHours: return 4 * 60 * 60
-        case .eightHours: return 8 * 60 * 60
-        case .twelveHours: return 12 * 60 * 60
-        case .sixteenHours: return 16 * 60 * 60
-        }
-    }
 }

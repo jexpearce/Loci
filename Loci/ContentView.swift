@@ -7,36 +7,29 @@ struct ContentView: View {
     @State private var showingSessionHistory = false
     
     var body: some View {
-        ZStack {
-            Color(hex: "121212")
-                .ignoresSafeArea()
-            
-            VStack(spacing: 30) {
-                // App Title
-                Text("Loci")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.top, 60)
-                
-                Spacer()
-                
+        ZStack(alignment: .top) {
+            Color(hex: "0A001A").ignoresSafeArea()
+            VStack(spacing: 24) {
+                HStack {
+                    LociHeaderView()
+                    Spacer()
+                    SettingsIcon()
+                }
+                .padding(.horizontal)
+                .padding(.top, 24)
                 if sessionManager.isSessionActive {
-                    // Active Session View
-                    ActiveSessionView()
-                } else {
-                    // Start Session View
-                    StartSessionView(selectedDuration: $selectedDuration)
+                    LiveIndicator()
                 }
-                
+                SessionInfoLabel()
+                SessionDurationPicker(selectedDuration: $selectedDuration)
+                StartSessionButton(selectedDuration: $selectedDuration)
+                HStack(spacing: 12) {
+                    SpotifyStatusChip()
+                    LocationStatusChip()
+                }
+                RecentSessionPreview(showingSessionHistory: $showingSessionHistory)
+                SocialTeaserCard()
                 Spacer()
-                
-                // History Button
-                Button(action: { showingSessionHistory.toggle() }) {
-                    Label("Session History", systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.bottom, 40)
             }
         }
         .sheet(isPresented: $showingSessionHistory) {

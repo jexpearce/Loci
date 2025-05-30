@@ -38,29 +38,3 @@ final class GeocodingService {
 }
 
 
-// === Diff: SessionManager.swift
-// Path: Loci/Services/SessionManager.swift
-
-@@ private func performLocationUpdate() {
--        // Reverse geocode to get building
--        locationManager.reverseGeocode(location: location) { [weak self] building in
--            guard let self = self else { return }
-+        // Async reverse-geocode via GeocodingService
-+        Task { [weak self] in
-+            guard let self = self else { return }
-+            let clLocation = CLLocation(latitude: location.coordinate.latitude,
-+                                        longitude: location.coordinate.longitude)
-+            let building = await GeocodingService.shared.reverseGeocode(clLocation)
-
--            // Get current Spotify track
--            self.spotifyManager.getCurrentTrack { track in
-+            // Get current Spotify track
-+            self.spotifyManager.getCurrentTrack { track in
-@@
--                // End background task
--                self.endBackgroundTask()
-+                // defer in wrapper will end the BG task automatically
-             }
--        }
-+        }
-@@
