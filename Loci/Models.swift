@@ -3,11 +3,13 @@ import SwiftData
 
 // MARK: - Session Mode
 
-enum SessionMode: String, CaseIterable, Codable {
+enum SessionMode: String, CaseIterable, Codable, Identifiable {
     case manual    // "Manual/Region" mode: user picks building/region from a map
     case passive   // One-time GPS ping, pin that building for entire session
     case active    // Continuous (~90s) tracking + partial events
     case unknown   // Fallback for legacy sessions or errors
+    
+    var id: String { rawValue }
 }
 
 // MARK: - SwiftData Models

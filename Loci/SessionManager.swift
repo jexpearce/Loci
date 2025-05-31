@@ -89,6 +89,15 @@ class SessionManager: ObservableObject {
                 return
             }
             dataStore.setSingleSessionBuilding(regionName)
+            
+        case .unknown:
+            // ── Unknown mode: fallback to manual behavior ──
+            print("⚠️ Unknown session mode, falling back to manual mode")
+            if let regionName = manualRegionName {
+                dataStore.setSingleSessionBuilding(regionName)
+            } else {
+                dataStore.setSingleSessionBuilding("Unknown Location")
+            }
         }
         
         // Log session start
@@ -175,6 +184,35 @@ class SessionManager: ObservableObject {
                     duration: self.calculateSessionDuration(start: start, end: end),
                     mode: .manual,
                     events: manualEvents
+                )
+            }
+            
+        case .unknown:
+            // ── Unknown mode: treat as manual mode ──
+            print("⚠️ Stopping unknown session mode, treating as manual")
+            guard let start = sessionStartTime, let end = sessionEndTime else { return }
+            let region = self.dataStore.singleSessionBuildingName ?? "Unknown Location"
+            spotifyManager.fetchRecentlyPlayed(after: start, before: end) { [weak self] tracks in
+                guard let self = self else { return }
+                let unknownEvents = tracks.map { trackData -> ListeningEvent in
+                    ListeningEvent(
+                        timestamp: trackData.playedAt,
+                        latitude: 0.0,
+                        longitude: 0.0,
+                        buildingName: region,
+                        trackName: trackData.title,
+                        artistName: trackData.artist,
+                        albumName: trackData.album,
+                        genre: nil,
+                        spotifyTrackId: trackData.id
+                    )
+                }
+                self.dataStore.saveSession(
+                    startTime: start,
+                    endTime: end,
+                    duration: self.calculateSessionDuration(start: start, end: end),
+                    mode: .unknown,
+                    events: unknownEvents
                 )
             }
         }

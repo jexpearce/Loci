@@ -44,6 +44,11 @@ struct PassiveSessionView: View {
                     // Session Info
                     SessionInfoCard(location: selectedLocation)
                     
+                    // Stay in Place Warning
+                    if selectedLocation != nil {
+                        StayInPlaceWarningCard()
+                    }
+                    
                     // Start Button
                     StartPassiveSessionButton(
                         canStart: selectedLocation != nil,
@@ -362,6 +367,33 @@ struct InfoItem: View {
                 .font(LociTheme.Typography.caption)
                 .foregroundColor(LociTheme.Colors.mainText)
         }
+    }
+}
+
+// MARK: - Stay in Place Warning Card
+
+struct StayInPlaceWarningCard: View {
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 16))
+                .foregroundColor(LociTheme.Colors.primaryAction)
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text("Stay in Place Warning")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Please ensure you are staying in the selected location for the duration of the session.")
+                    .font(.system(size: 11))
+                    .foregroundColor(LociTheme.Colors.mainText.opacity(0.7))
+            }
+            
+            Spacer()
+        }
+        .padding(LociTheme.Spacing.small)
+        .background(LociTheme.Colors.primaryAction.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.small)
     }
 }
 
