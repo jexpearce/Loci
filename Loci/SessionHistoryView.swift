@@ -593,30 +593,3 @@ struct SessionInsightsTab: View {
         }
     }
 }
-
-// MARK: - Session Mode Badge
-
-struct SessionModeBadge: View {
-    let mode: SessionMode
-    
-    private var modeInfo: (displayName: String, color: Color) {
-        switch mode {
-        case .manual:
-            return ("Manual", LociTheme.Colors.primaryAction)
-        case .passive:
-            return ("Passive", LociTheme.Colors.secondaryHighlight)
-        case .active:
-            return ("Live", LociTheme.Colors.notificationBadge)
-        }
-    }
-    
-    var body: some View {
-        Text(modeInfo.displayName)
-            .font(LociTheme.Typography.caption)
-            .foregroundColor(modeInfo.color)
-            .padding(.horizontal, LociTheme.Spacing.xSmall)
-            .padding(.vertical, 2)
-            .background(modeInfo.color.opacity(0.15))
-            .cornerRadius(LociTheme.CornerRadius.small)
-    }
-}
