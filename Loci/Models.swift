@@ -207,3 +207,139 @@ extension ListeningEvent: Codable {
         self.id = id
     }
 }
+
+// MARK: - Firebase Models
+
+struct User: Codable, Identifiable {
+    let id: String
+    let email: String
+    let displayName: String
+    let spotifyUserId: String?
+    let profileImageURL: String?
+    let joinedDate: Date
+    let privacySettings: PrivacySettings
+    let musicPreferences: MusicPreferences
+}
+
+struct PrivacySettings: Codable {
+    var shareLocation: Bool = true
+    var shareListeningActivity: Bool = true
+    var allowFriendRequests: Bool = true
+    var showOnlineStatus: Bool = true
+    var defaultSessionPrivacy: Session.PrivacyLevel = .friends
+    
+    init() {}
+}
+
+struct MusicPreferences: Codable {
+    var favoriteGenres: [String] = []
+    var favoriteArtists: [String] = []
+    var discoverabilityRadius: Double = 1000 // meters
+    
+    init() {}
+}
+
+struct BuildingActivity: Codable, Identifiable {
+    let id: String
+    let buildingName: String
+    let latitude: Double
+    let longitude: Double
+    let lastActivity: Date
+    let activeUsers: Int
+    let currentTracks: [TrackInfo]
+    let popularGenres: [String]
+}
+
+struct TrackInfo: Codable, Identifiable {
+    let id: String
+    let name: String
+    let artist: String
+    let album: String?
+    let spotifyId: String
+    let playCount: Int
+}
+
+// MARK: - Session Privacy Extension
+
+extension Session {
+    enum PrivacyLevel: String, Codable, CaseIterable {
+        case `private` = "private"
+        case friends = "friends" 
+        case `public` = "public"
+        
+        var displayName: String {
+            switch self {
+            case .private: return "Private"
+            case .friends: return "Friends Only"
+            case .public: return "Public"
+            }
+        }
+        
+        var icon: String {
+            switch self {
+            case .private: return "lock.fill"
+            case .friends: return "person.2.fill"
+            case .public: return "globe"
+            }
+        }
+    }
+    
+    // Store privacy level in metadata for SwiftData compatibility
+    var metadata: [String: Any] {
+        get {
+            // This would need to be implemented as a stored property in SwiftData
+            // For now, return empty dict - you'll need to add a metadata property to the @Model
+            return [:]
+        }
+        set {
+            // This would need to be implemented to store in SwiftData
+        }
+    }
+    
+    var privacyLevel: PrivacyLevel {
+        get {
+            return PrivacyLevel(rawValue: metadata["privacyLevel"] as? String ?? "private") ?? .private
+        }
+        set {
+            // This would need to be implemented to store in SwiftData metadata
+        }
+    }
+    
+    // Computed property for location info
+    var location: LocationInfo? {
+        guard let firstEvent = events.first else { return nil }
+        return LocationInfo(
+            latitude: firstEvent.latitude,
+            longitude: firstEvent.longitude,
+            building: firstEvent.buildingName
+        )
+    }
+}
+
+struct LocationInfo: Codable {
+    let latitude: Double
+    let longitude: Double
+    let building: String?
+}
+
+// MARK: - Firebase Errors
+
+enum FirebaseError: Error, LocalizedError {
+    case notAuthenticated
+    case invalidData
+    case networkError
+    case permissionDenied
+    
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "User is not authenticated"
+        case .invalidData:
+            return "Invalid data format"
+        case .networkError:
+            return "Network connection error"
+        case .permissionDenied:
+            return "Permission denied"
+        }
+    }
+}
