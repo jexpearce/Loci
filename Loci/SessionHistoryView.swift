@@ -435,7 +435,7 @@ struct SessionHeaderCard: View {
                 .font(LociTheme.Typography.subheading)
                 .foregroundColor(LociTheme.Colors.mainText)
             
-            Text("\(session.startTime.formatted(time: .shortened)) - \(session.endTime.formatted(time: .shortened))")
+            Text("\(session.startTime.formatted(date: .omitted, time: .shortened)) - \(session.endTime.formatted(date: .omitted, time: .shortened))")
                 .font(LociTheme.Typography.caption)
                 .foregroundColor(LociTheme.Colors.subheadText)
         }
