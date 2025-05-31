@@ -515,7 +515,8 @@ class AnalyticsEngine: ObservableObject {
             locationVector: createVector(from: locationFrequency),
             timeVector: createVector(from: timePatterns),
             diversityScore: calculateDiversity(artistFrequency),
-            totalEvents: events.count
+            totalEvents: events.count,
+            createdAt: Date()
         )
     }
     
@@ -756,15 +757,7 @@ struct TimePatternAnalysis {
     let genreTimePreferences: [String: TimeOfDay]
 }
 
-struct ListeningFingerprint {
-    let id: UUID
-    let artistVector: [Double]
-    let genreVector: [Double]
-    let locationVector: [Double]
-    let timeVector: [Double]
-    let diversityScore: Double
-    let totalEvents: Int
-}
+
 
 struct BuildingLeaderboards {
     let building: String
@@ -786,44 +779,8 @@ struct GenreChampion: Codable {
     let playCount: Int
 }
 
-enum TimeRange: String, Codable {
-    case today = "today"
-    case thisWeek = "week"
-    case thisMonth = "month"
-    case allTime = "all"
-    
-    var startDate: Date {
-        let calendar = Calendar.current
-        switch self {
-        case .today:
-            return calendar.startOfDay(for: Date())
-        case .thisWeek:
-            return calendar.dateInterval(of: .weekOfYear, for: Date())?.start ?? Date()
-        case .thisMonth:
-            return calendar.dateInterval(of: .month, for: Date())?.start ?? Date()
-        case .allTime:
-            return Date.distantPast
-        }
-    }
-}
 
-enum TimeOfDay: String, Codable {
-    case earlyMorning // 5-8
-    case morning      // 8-12
-    case afternoon    // 12-17
-    case evening      // 17-22
-    case lateNight    // 22-5
-    
-    static func from(hour: Int) -> TimeOfDay {
-        switch hour {
-        case 5..<8: return .earlyMorning
-        case 8..<12: return .morning
-        case 12..<17: return .afternoon
-        case 17..<22: return .evening
-        default: return .lateNight
-        }
-    }
-}
+
 
 // MARK: - New Supporting Types (add these to the bottom of AnalyticsEngine.swift)
 

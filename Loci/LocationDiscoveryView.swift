@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import FirebaseFirestore
 
 struct LocationDiscoveryView: View {
     @StateObject private var firebaseManager = FirebaseManager.shared
@@ -103,13 +104,13 @@ struct LocationDiscoveryView: View {
                 
                 StatItem(
                     icon: "person.2.fill",
-                    value: "\(nearbyActivity.reduce(0) { $0 + $1.currentListeners })",
+                    value: "\(nearbyActivity.reduce(0) { $0 + $1.activeUsers })",
                     label: "Listeners"
                 )
                 
                 StatItem(
                     icon: "music.note",
-                    value: "\(nearbyActivity.flatMap { $0.recentTracks }.count)",
+                    value: "\(nearbyActivity.flatMap { $0.currentTracks }.count)",
                     label: "Tracks"
                 )
             }
@@ -162,14 +163,14 @@ struct LocationDiscoveryView: View {
     private func startLocationDiscovery() {
         guard let location = locationManager.currentLocation else {
             // Request location permission if needed
-            locationManager.requestLocationPermission()
+            locationManager.requestPermissions()
             return
         }
         
         // Start real-time listener
         activityListener = firebaseManager.listenToNearbyActivity(location: location) { activities in
             DispatchQueue.main.async {
-                self.nearbyActivity = activities.sorted { $0.currentListeners > $1.currentListeners }
+                self.nearbyActivity = activities.sorted { $0.activeUsers > $1.activeUsers }
                 self.isLoading = false
             }
         }
@@ -224,7 +225,7 @@ struct BuildingActivityCard: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.blue)
                             
-                            Text("\(activity.currentListeners) listening")
+                            Text("\(activity.activeUsers) listening")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.white.opacity(0.8))
                         }
@@ -251,13 +252,13 @@ struct BuildingActivityCard: View {
                 }
                 
                 // Recent tracks
-                if !activity.recentTracks.isEmpty {
+                if !activity.currentTracks.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Now Playing")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.9))
                         
-                        ForEach(Array(activity.recentTracks.prefix(3).enumerated()), id: \.offset) { index, track in
+                        ForEach(Array(activity.currentTracks.prefix(3).enumerated()), id: \.offset) { index, track in
                             HStack(spacing: 12) {
                                 Image(systemName: "music.note")
                                     .font(.system(size: 14, weight: .medium))
@@ -371,7 +372,7 @@ struct BuildingDetailView: View {
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.blue)
                                     
-                                    Text("\(activity.currentListeners) listening")
+                                    Text("\(activity.activeUsers) listening")
                                         .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(.white.opacity(0.9))
                                 }
@@ -389,13 +390,13 @@ struct BuildingDetailView: View {
                         }
                         
                         // All tracks
-                        if !activity.recentTracks.isEmpty {
+                        if !activity.currentTracks.isEmpty {
                             VStack(alignment: .leading, spacing: 16) {
                                 Text("Recent Activity")
                                     .font(.system(size: 20, weight: .bold))
                                     .foregroundColor(.white)
                                 
-                                ForEach(Array(activity.recentTracks.enumerated()), id: \.offset) { index, track in
+                                ForEach(Array(activity.currentTracks.enumerated()), id: \.offset) { index, track in
                                     HStack(spacing: 16) {
                                         ZStack {
                                             Circle()
@@ -482,7 +483,7 @@ struct DiscoveryMapView: View {
                                 .fill(Color.purple)
                                 .frame(width: 32, height: 32)
                             
-                            Text("\(activity.currentListeners)")
+                            Text("\(activity.activeUsers)")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundColor(.white)
                         }

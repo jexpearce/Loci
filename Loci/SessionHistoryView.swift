@@ -365,7 +365,7 @@ struct DetailTabSelector: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
-                TabButton(
+                SessionTabButton(
                     title: tab.rawValue,
                     isSelected: selectedTab == tab
                 ) {
@@ -380,7 +380,7 @@ struct DetailTabSelector: View {
     }
 }
 
-struct TabButton: View {
+struct SessionTabButton: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void

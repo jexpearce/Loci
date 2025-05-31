@@ -131,8 +131,8 @@ class FirebaseManager: ObservableObject {
             throw FirebaseError.notAuthenticated
         }
         
-        var sessionData = try Firestore.Encoder().encode(session)
-        sessionData["userId"] = userId
+        let firebaseSession = FirebaseSession(from: session, userId: userId)
+        var sessionData = try Firestore.Encoder().encode(firebaseSession)
         sessionData["createdAt"] = FieldValue.serverTimestamp()
         
         try await db.collection("sessions").document(session.id.uuidString).setData(sessionData)
@@ -155,7 +155,8 @@ class FirebaseManager: ObservableObject {
         
         let snapshot = try await query.getDocuments()
         return try snapshot.documents.compactMap { document in
-            try Firestore.Decoder().decode(Session.self, from: document.data())
+            let firebaseSession = try Firestore.Decoder().decode(FirebaseSession.self, from: document.data())
+            return firebaseSession.toSession()
         }
     }
     
@@ -200,38 +201,42 @@ class FirebaseManager: ObservableObject {
                 
                 var data: [String: Any] = [
                     "buildingName": building,
-                    "latitude": session.location?.coordinate.latitude ?? 0,
-                    "longitude": session.location?.coordinate.longitude ?? 0,
+                    "latitude": session.location?.latitude ?? 0,
+                    "longitude": session.location?.longitude ?? 0,
                     "lastActivity": FieldValue.serverTimestamp()
                 ]
                 
                 if document.exists {
                     // Update existing activity
-                    let currentListeners = document.data()?["currentListeners"] as? Int ?? 0
-                    data["currentListeners"] = currentListeners + 1
+                    let currentListeners = document.data()?["activeUsers"] as? Int ?? 0
+                    data["activeUsers"] = currentListeners + 1
                     
                     // Add current tracks
-                    if let currentTrack = session.tracks.last {
-                        var recentTracks = document.data()?["recentTracks"] as? [[String: Any]] ?? []
+                    if let currentEvent = session.events.last {
+                        var currentTracks = document.data()?["currentTracks"] as? [[String: Any]] ?? []
                         let trackData: [String: Any] = [
-                            "name": currentTrack.name,
-                            "artist": currentTrack.artist,
+                            "id": UUID().uuidString,
+                            "name": currentEvent.trackName,
+                            "artist": currentEvent.artistName,
+                            "album": currentEvent.albumName ?? "",
+                            "spotifyId": currentEvent.spotifyTrackId,
+                            "playCount": 1,
                             "timestamp": FieldValue.serverTimestamp()
                         ]
-                        recentTracks.append(trackData)
+                        currentTracks.append(trackData)
                         
                         // Keep only last 10 tracks
-                        if recentTracks.count > 10 {
-                            recentTracks = Array(recentTracks.suffix(10))
+                        if currentTracks.count > 10 {
+                            currentTracks = Array(currentTracks.suffix(10))
                         }
-                        data["recentTracks"] = recentTracks
+                        data["currentTracks"] = currentTracks
                     }
                     
                     transaction.updateData(data, forDocument: buildingRef)
                 } else {
                     // Create new activity
-                    data["currentListeners"] = 1
-                    data["recentTracks"] = []
+                    data["activeUsers"] = 1
+                    data["currentTracks"] = []
                     transaction.setData(data, forDocument: buildingRef)
                 }
                 
@@ -271,89 +276,84 @@ class FirebaseManager: ObservableObject {
     }
 }
 
-// MARK: - Supporting Models
+// MARK: - Firebase-Compatible Models
 
-struct User: Codable, Identifiable {
+// Firebase-compatible Session struct for encoding/decoding
+struct FirebaseSession: Codable {
     let id: String
-    let email: String
-    let displayName: String
-    let spotifyUserId: String?
-    let profileImageURL: String?
-    let joinedDate: Date
-    let privacySettings: PrivacySettings
-    let musicPreferences: MusicPreferences
+    let startTime: Date
+    let endTime: Date
+    let duration: String
+    let mode: SessionMode
+    let events: [FirebaseListeningEvent]
+    let userId: String?
+    let createdAt: Date?
+    let privacyLevel: SessionPrivacyLevel
+    
+    init(from session: Session, userId: String? = nil) {
+        self.id = session.id.uuidString
+        self.startTime = session.startTime
+        self.endTime = session.endTime
+        self.duration = session.duration.rawValue
+        self.mode = session.mode
+        self.events = session.events.map { FirebaseListeningEvent(from: $0) }
+        self.userId = userId
+        self.createdAt = nil // Will be set by Firestore
+        self.privacyLevel = session.privacyLevel
+    }
+    
+    func toSession() -> Session {
+        let session = Session(
+            startTime: startTime,
+            endTime: endTime,
+            duration: SessionDuration(rawValue: duration) ?? .twelveHours,
+            mode: mode,
+            events: events.map { $0.toListeningEvent() }
+        )
+        session.id = UUID(uuidString: id) ?? UUID()
+        return session
+    }
 }
 
-struct PrivacySettings: Codable {
-    var shareLocation: Bool = true
-    var shareListening: Bool = true
-    var allowDiscovery: Bool = true
-    var shareProfile: Bool = true
-}
-
-struct MusicPreferences: Codable {
-    var favoriteGenres: [String] = []
-    var favoriteArtists: [String] = []
-    var discoveryRadius: Double = 1000 // meters
-}
-
-struct BuildingActivity: Codable, Identifiable {
+// Firebase-compatible ListeningEvent struct
+struct FirebaseListeningEvent: Codable {
     let id: String
-    let buildingName: String
+    let timestamp: Date
     let latitude: Double
     let longitude: Double
-    let currentListeners: Int
-    let recentTracks: [RecentTrack]
-    let lastActivity: Date
-}
-
-struct RecentTrack: Codable {
-    let name: String
-    let artist: String
-    let timestamp: Date
-}
-
-enum FirebaseError: Error, LocalizedError {
-    case notAuthenticated
-    case invalidData
-    case networkError
+    let buildingName: String?
+    let trackName: String
+    let artistName: String
+    let albumName: String?
+    let genre: String?
+    let spotifyTrackId: String
     
-    var errorDescription: String? {
-        switch self {
-        case .notAuthenticated:
-            return "User not authenticated"
-        case .invalidData:
-            return "Invalid data format"
-        case .networkError:
-            return "Network error occurred"
-        }
-    }
-}
-
-// MARK: - Session Privacy Extension
-
-extension Session {
-    enum PrivacyLevel: String, Codable, CaseIterable {
-        case `private` = "private"
-        case friends = "friends"
-        case `public` = "public"
-        
-        var displayName: String {
-            switch self {
-            case .private: return "Private"
-            case .friends: return "Friends Only"
-            case .public: return "Public"
-            }
-        }
+    init(from event: ListeningEvent) {
+        self.id = event.id.uuidString
+        self.timestamp = event.timestamp
+        self.latitude = event.latitude
+        self.longitude = event.longitude
+        self.buildingName = event.buildingName
+        self.trackName = event.trackName
+        self.artistName = event.artistName
+        self.albumName = event.albumName
+        self.genre = event.genre
+        self.spotifyTrackId = event.spotifyTrackId
     }
     
-    var privacyLevel: PrivacyLevel {
-        get {
-            // Default to private for existing sessions
-            return PrivacyLevel(rawValue: self.metadata["privacyLevel"] as? String ?? "private") ?? .private
-        }
-        set {
-            self.metadata["privacyLevel"] = newValue.rawValue
-        }
+    func toListeningEvent() -> ListeningEvent {
+        let event = ListeningEvent(
+            timestamp: timestamp,
+            latitude: latitude,
+            longitude: longitude,
+            buildingName: buildingName,
+            trackName: trackName,
+            artistName: artistName,
+            albumName: albumName,
+            genre: genre,
+            spotifyTrackId: spotifyTrackId
+        )
+        event.id = UUID(uuidString: id) ?? UUID()
+        return event
     }
 } 

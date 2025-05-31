@@ -330,35 +330,12 @@ class KeychainManager {
 
 // MARK: - Supporting Types
 
-struct PrivacySettings: Codable {
-    var locationPrecision: LocationPrecision = .building
-    var timePrecision: TimePrecision = .minute
-    var shareTrackNames: Bool = true
-    var shareArtistNames: Bool = true
-    var allowAnalytics: Bool = true
-    var blockedUsers: Set<String> = []
-}
-
 struct SharingPreferences: Codable {
     var defaultVisibility: Visibility = .matches
     var shareLocation: Bool = true
     var shareMusic: Bool = true
     var sharePatterns: Bool = true
     var shareSocial: Bool = false
-}
-
-enum LocationPrecision: String, Codable, CaseIterable {
-    case exact = "Exact"
-    case building = "Building"
-    case neighborhood = "Neighborhood"
-    case city = "City"
-}
-
-enum TimePrecision: String, Codable, CaseIterable {
-    case exact = "Exact"
-    case minute = "Minute"
-    case hour = "Hour"
-    case day = "Day"
 }
 
 enum Visibility: String, Codable, CaseIterable {

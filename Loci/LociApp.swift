@@ -78,13 +78,21 @@ struct MainAppView: View {
                 }
                 .tag(1)
             
+            // Matching tab
+            MatchingView()
+                .tabItem {
+                    Image(systemName: "heart.fill")
+                    Text("Matches")
+                }
+                .tag(2)
+            
             // Friends tab
             FriendsView()
                 .tabItem {
                     Image(systemName: "person.2.fill")
                     Text("Friends")
                 }
-                .tag(2)
+                .tag(3)
             
             // Profile tab
             UserProfileView()
@@ -92,7 +100,7 @@ struct MainAppView: View {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
-                .tag(3)
+                .tag(4)
         }
         .accentColor(.blue)
     }

@@ -503,7 +503,7 @@ struct TrendAlert: Decodable {
 
 struct LocationActivityUpdate: Decodable {
     let building: String
-    let currentListeners: Int
+    let activeUsers: Int
     let activeTracks: [String]
     let dominantGenre: String?
     let activityLevel: Double

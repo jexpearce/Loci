@@ -21,6 +21,7 @@ class Session {
     var endTime: Date
     var durationRaw: String
     var mode: SessionMode
+    var privacyLevelRaw: String = SessionPrivacyLevel.friends.rawValue
     @Relationship(deleteRule: .cascade) var events: [ListeningEvent] = []
 
     init(startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent] = []) {
@@ -221,14 +222,69 @@ struct User: Codable, Identifiable {
     let musicPreferences: MusicPreferences
 }
 
+// MARK: - Session Privacy
+
+enum SessionPrivacyLevel: String, Codable, CaseIterable {
+    case `private` = "private"
+    case friends = "friends" 
+    case `public` = "public"
+    
+    var displayName: String {
+        switch self {
+        case .private: return "Private"
+        case .friends: return "Friends Only"
+        case .public: return "Public"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .private: return "lock.fill"
+        case .friends: return "person.2.fill"
+        case .public: return "globe"
+        }
+    }
+}
+
 struct PrivacySettings: Codable {
+    // Social sharing settings
     var shareLocation: Bool = true
     var shareListeningActivity: Bool = true
     var allowFriendRequests: Bool = true
     var showOnlineStatus: Bool = true
-    var defaultSessionPrivacy: Session.PrivacyLevel = .friends
+    var defaultSessionPrivacy: SessionPrivacyLevel = .friends
+    
+    // Data precision settings
+    var locationPrecision: LocationPrecision = .building
+    var timePrecision: TimePrecision = .minute
+    var shareTrackNames: Bool = true
+    var shareArtistNames: Bool = true
+    var allowAnalytics: Bool = true
+    
+    // User management
+    var blockedUsers: Set<String> = []
+    
+    // Discovery settings
+    var allowDiscovery: Bool = true
+    var shareProfile: Bool = true
     
     init() {}
+}
+
+// MARK: - Privacy Supporting Types
+
+enum LocationPrecision: String, Codable, CaseIterable {
+    case exact = "Exact"
+    case building = "Building"
+    case neighborhood = "Neighborhood"
+    case city = "City"
+}
+
+enum TimePrecision: String, Codable, CaseIterable {
+    case exact = "Exact"
+    case minute = "Minute"
+    case hour = "Hour"
+    case day = "Day"
 }
 
 struct MusicPreferences: Codable {
@@ -257,51 +313,21 @@ struct TrackInfo: Codable, Identifiable {
     let album: String?
     let spotifyId: String
     let playCount: Int
+    let timestamp: Date
 }
 
 // MARK: - Session Privacy Extension
 
 extension Session {
-    enum PrivacyLevel: String, Codable, CaseIterable {
-        case `private` = "private"
-        case friends = "friends" 
-        case `public` = "public"
-        
-        var displayName: String {
-            switch self {
-            case .private: return "Private"
-            case .friends: return "Friends Only"
-            case .public: return "Public"
-            }
-        }
-        
-        var icon: String {
-            switch self {
-            case .private: return "lock.fill"
-            case .friends: return "person.2.fill"
-            case .public: return "globe"
-            }
-        }
-    }
+    // For backward compatibility, create a typealias
+    typealias PrivacyLevel = SessionPrivacyLevel
     
-    // Store privacy level in metadata for SwiftData compatibility
-    var metadata: [String: Any] {
+    var privacyLevel: SessionPrivacyLevel {
         get {
-            // This would need to be implemented as a stored property in SwiftData
-            // For now, return empty dict - you'll need to add a metadata property to the @Model
-            return [:]
+            return SessionPrivacyLevel(rawValue: privacyLevelRaw) ?? .friends
         }
         set {
-            // This would need to be implemented to store in SwiftData
-        }
-    }
-    
-    var privacyLevel: PrivacyLevel {
-        get {
-            return PrivacyLevel(rawValue: metadata["privacyLevel"] as? String ?? "private") ?? .private
-        }
-        set {
-            // This would need to be implemented to store in SwiftData metadata
+            privacyLevelRaw = newValue.rawValue
         }
     }
     
@@ -340,6 +366,61 @@ enum FirebaseError: Error, LocalizedError {
             return "Network connection error"
         case .permissionDenied:
             return "Permission denied"
+        }
+    }
+}
+
+// MARK: - Matching System Types
+
+struct ListeningFingerprint: Codable {
+    let id: UUID
+    let artistVector: [Double]
+    let genreVector: [Double]
+    let locationVector: [Double]
+    let timeVector: [Double]
+    let diversityScore: Double
+    let totalEvents: Int
+    let createdAt: Date
+}
+
+enum TimeOfDay: String, CaseIterable, Codable {
+    case earlyMorning = "earlyMorning"
+    case morning = "morning"
+    case afternoon = "afternoon"
+    case evening = "evening"
+    case lateNight = "lateNight"
+    
+    static func from(hour: Int) -> TimeOfDay {
+        switch hour {
+        case 5..<8: return .earlyMorning
+        case 8..<12: return .morning
+        case 12..<17: return .afternoon
+        case 17..<22: return .evening
+        default: return .lateNight
+        }
+    }
+    
+}
+
+// MARK: - Analytics Types
+
+enum TimeRange: String, Codable {
+    case today = "today"
+    case thisWeek = "week"
+    case thisMonth = "month"
+    case allTime = "all"
+    
+    var startDate: Date {
+        let calendar = Calendar.current
+        switch self {
+        case .today:
+            return calendar.startOfDay(for: Date())
+        case .thisWeek:
+            return calendar.dateInterval(of: .weekOfYear, for: Date())?.start ?? Date()
+        case .thisMonth:
+            return calendar.dateInterval(of: .month, for: Date())?.start ?? Date()
+        case .allTime:
+            return Date.distantPast
         }
     }
 }
