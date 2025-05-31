@@ -40,6 +40,7 @@ class AnalyticsEngine: ObservableObject {
         guard !events.isEmpty else {
             return SessionAnalytics(
                 sessionId: UUID(),
+                mode: .unknown,
                 totalTracks: 0,
                 uniqueTracks: 0,
                 uniqueArtists: 0,
@@ -106,6 +107,7 @@ class AnalyticsEngine: ObservableObject {
         
         return SessionAnalytics(
             sessionId: UUID(),
+            mode: .unknown,
             totalTracks: events.count,
             uniqueTracks: uniqueTracks,
             uniqueArtists: uniqueArtists,
@@ -827,6 +829,7 @@ enum TimeOfDay: String, Codable {
 
 struct SessionAnalytics {
     let sessionId: UUID
+    let mode: SessionMode // Track which mode was used
     let totalTracks: Int
     let uniqueTracks: Int
     let uniqueArtists: Int

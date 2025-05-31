@@ -11,7 +11,8 @@ class DataStore: ObservableObject {
 
     @Published var currentSessionEvents: [ListeningEvent] = []
     @Published var sessionHistory: [Session] = []
-    fileprivate var singleSessionBuildingName: String?
+    @Published var sessionMode: SessionMode = .active
+    var singleSessionBuildingName: String?
 
     private init() {
         self.container = try! ModelContainer(
@@ -45,20 +46,45 @@ class DataStore: ObservableObject {
 
     // MARK: - Session History Management
 
-    func saveSession(startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent]) {
-        Task { @MainActor in
-            let session = Session(
-                startTime: startTime,
-                endTime: endTime,
-                duration: duration,
-                mode: mode,
-                events: events
-            )
-            container.mainContext.insert(session)
-            try? container.mainContext.save()
-
+    func saveSession(
+        startTime: Date,
+        endTime: Date,
+        duration: SessionDuration,
+        mode: SessionMode,
+        events: [ListeningEvent]
+    ) {
+        let session = Session(
+            startTime: startTime,
+            endTime: endTime,
+            duration: duration,
+            mode: mode,
+            events: events
+        )
+        
+        container.mainContext.insert(session)
+        
+        do {
+            try container.mainContext.save()
+            print("✅ Session saved with \(events.count) events (mode: \(mode.rawValue))")
+            
+            // Update session history
             sessionHistory.insert(session, at: 0)
             clearCurrentSession()
+            
+            // Notify completion
+            NotificationCenter.default.post(
+                name: .sessionCompleted,
+                object: SessionData(
+                    id: session.id,
+                    startTime: startTime,
+                    endTime: endTime,
+                    duration: duration,
+                    events: events
+                )
+            )
+            
+        } catch {
+            print("❌ Failed to save session: \(error)")
         }
     }
     

@@ -515,7 +515,11 @@ struct LocationPickerView: View {
                         address: String(format: "%.4f, %.4f", coordinate.latitude, coordinate.longitude),
                         category: .unknown,
                         coordinates: coordinate,
-                        confidence: 0.5
+                        confidence: 0.5,
+                        neighborhood: nil,
+                        city: nil,
+                        postalCode: nil,
+                        country: nil
                     )
                     
                     self.selectedLocation = SelectedLocation(
@@ -607,7 +611,11 @@ struct ManualLocationEntryView: View {
             address: address.isEmpty ? nil : address,
             category: selectedCategory,
             coordinates: CLLocationCoordinate2D(latitude: 0, longitude: 0),
-            confidence: 1.0
+            confidence: 1.0,
+            neighborhood: nil,
+            city: nil,
+            postalCode: nil,
+            country: nil
         )
         
         selectedLocation = SelectedLocation(

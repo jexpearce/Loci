@@ -262,6 +262,37 @@ extension LocationManager: CLLocationManagerDelegate {
     func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
         print("▶️ Location updates resumed")
     }
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        DispatchQueue.main.async {
+            self.authorizationStatus = status
+            
+            switch status {
+            case .authorizedWhenInUse:
+                print("✅ Location permission: When In Use")
+                // For passive mode, this is sufficient
+                
+            case .authorizedAlways:
+                print("✅ Location permission: Always")
+                // Required for active mode background tracking
+                
+            case .denied, .restricted:
+                print("❌ Location permission denied")
+                // Notify UI to show fallback options
+                NotificationCenter.default.post(
+                    name: .locationPermissionDenied,
+                    object: nil,
+                    userInfo: ["status": status.rawValue]
+                )
+                
+            case .notDetermined:
+                print("⏳ Location permission not determined")
+                
+            @unknown default:
+                print("⚠️ Unknown location permission status")
+            }
+        }
+    }
 }
 
 // MARK: - CLLocationCoordinate2D Hashable
@@ -275,4 +306,9 @@ extension CLLocationCoordinate2D: Hashable {
     public static func == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
         return lhs.latitude == rhs.latitude && lhs.longitude == rhs.longitude
     }
+}
+
+extension Notification.Name {
+    static let sessionCompleted = Notification.Name("sessionCompleted")
+    static let locationPermissionDenied = Notification.Name("locationPermissionDenied")
 }

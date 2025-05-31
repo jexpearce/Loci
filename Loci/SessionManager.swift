@@ -3,7 +3,9 @@ import Combine
 import BackgroundTasks
 import UIKit
 import CoreLocation
+import UserNotifications
 
+@MainActor
 class SessionManager: ObservableObject {
     static let shared = SessionManager()
     
@@ -19,11 +21,15 @@ class SessionManager: ObservableObject {
     
     private var locationUpdateTimer: Timer?
     private var sessionEndTimer: Timer?
+    private var maxSessionTimer: Timer? // Maximum session length enforcement
     private var cancellables = Set<AnyCancellable>()
     
     // Background task identifiers
     private let backgroundTaskIdentifier = "com.loci.sessionUpdate"
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    
+    // Session limits
+    private let maxSessionLength: TimeInterval = 12 * 60 * 60 // 12 hours maximum
     
     private init() {
         //setupBackgroundTasks()
@@ -41,12 +47,21 @@ class SessionManager: ObservableObject {
         sessionStartTime = Date()
         dataStore.clearCurrentSession()
 
+        // Enforce maximum session length for all modes (12 hours)
+        maxSessionTimer = Timer.scheduledTimer(
+            timeInterval: maxSessionLength,
+            target: self,
+            selector: #selector(stopSessionDueToMaxLength),
+            userInfo: nil,
+            repeats: false
+        )
+
         switch mode {
         case .active:
             // ── "Active" (continuous) workflow: unchanged from before ──
             locationManager.startTracking()
             startLocationUpdateCycle()
-            // Auto-stop after 6 hours for active mode
+            // Auto-stop after 6 hours for active mode (in addition to max length)
             sessionEndTimer = Timer.scheduledTimer(
                 timeInterval: 6 * 60 * 60, // 6 hours
                 target: self,
@@ -80,11 +95,13 @@ class SessionManager: ObservableObject {
         logEvent(type: .sessionStart)
     }
     
-    @MainActor func stopSession() {
+    @objc func stopSession() {
         guard isSessionActive else { return }
         isSessionActive = false
         sessionEndTimer?.invalidate()
         sessionEndTimer = nil
+        maxSessionTimer?.invalidate()
+        maxSessionTimer = nil
         sessionEndTime = Date()
 
         switch sessionMode {
@@ -106,11 +123,11 @@ class SessionManager: ObservableObject {
             }
 
         case .passive:
-            // ── Passive mode: only call Spotify's recently‐played once ──
+            // ── Passive: Fetch recently-played for the session window ──
             guard let start = sessionStartTime, let end = sessionEndTime else { return }
+            let building = self.dataStore.singleSessionBuildingName ?? "Unknown Place"
             spotifyManager.fetchRecentlyPlayed(after: start, before: end) { [weak self] tracks in
                 guard let self = self else { return }
-                let building = self.dataStore.singleSessionBuildingName ?? "Unknown Place"
                 let passiveEvents = tracks.map { trackData -> ListeningEvent in
                     ListeningEvent(
                         timestamp: trackData.playedAt,
@@ -168,6 +185,11 @@ class SessionManager: ObservableObject {
         // Reset session times
         sessionStartTime = nil
         sessionEndTime = nil
+    }
+    
+    @objc private func stopSessionDueToMaxLength() {
+        print("⏰ Session stopped due to maximum length (12 hours)")
+        stopSession()
     }
     
     // MARK: - Helper Methods

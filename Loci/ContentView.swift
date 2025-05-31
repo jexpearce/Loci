@@ -81,55 +81,6 @@ struct HeaderView: View {
     }
 }
 
-// MARK: - Session Mode Selection View
-
-struct SessionModeSelectionView: View {
-    var body: some View {
-        VStack(spacing: LociTheme.Spacing.large) {
-            // Session Info
-            VStack(spacing: LociTheme.Spacing.small) {
-                Image(systemName: "music.note.house")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                    .glow(color: LociTheme.Colors.secondaryHighlight, radius: 12)
-                
-                Text("Start a Tracking Session")
-                    .font(LociTheme.Typography.subheading)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                
-                Text("Loci will log your Spotify tracks and location every 90 seconds. Session will auto-stop after 6 hours or you can stop anytime.")
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.mainText.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, LociTheme.Spacing.medium)
-            }
-            .padding(.vertical, LociTheme.Spacing.medium)
-            
-            // Session Mode Buttons
-            HStack(spacing: LociTheme.Spacing.medium) {
-                Button(action: {
-                    // Implement the action for starting a session in active mode
-                }) {
-                    Text("Start Live Session")
-                        .font(LociTheme.Typography.button)
-                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                }
-                .lociButton(.gradient, isFullWidth: true)
-                
-                Button(action: {
-                    // Implement the action for starting a session in passive mode
-                }) {
-                    Text("Start Passive Session")
-                        .font(LociTheme.Typography.button)
-                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                }
-                .lociButton(.secondary, isFullWidth: true)
-            }
-        }
-        .padding(.vertical, LociTheme.Spacing.medium)
-    }
-}
-
 // MARK: - Active Session View
 
 struct ActiveSessionView: View {

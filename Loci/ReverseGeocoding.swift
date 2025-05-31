@@ -1,4 +1,3 @@
-
 import Foundation
 import CoreLocation
 import Combine
@@ -30,6 +29,12 @@ class ReverseGeocoding: NSObject, ObservableObject {
     @Published var cacheHitRate: Double = 0.0
     private var totalRequests = 0
     private var cacheHits = 0
+    
+    // MARK: - Rate Limiting & Throttling
+    
+    private var isGeocoding = false
+    private var lastGeocodeTime = Date.distantPast
+    private let minimumGeocodeInterval: TimeInterval = 2.0 // 2 seconds between requests
     
     private override init() {
         super.init()
@@ -100,15 +105,37 @@ class ReverseGeocoding: NSObject, ObservableObject {
     
     // MARK: - Async Interface
     
-    private func reverseGeocodeAsync(location: CLLocation) async -> BuildingInfo? {
-        // Check cache
+    func reverseGeocodeAsync(location: CLLocation) async -> BuildingInfo? {
+        // Check cache first
         if let cached = checkCache(for: location) {
             return cached
         }
         
-        // Perform geocoding
+        // Throttle requests to avoid rate limiting
+        let now = Date()
+        let timeSinceLastGeocode = now.timeIntervalSince(lastGeocodeTime)
+        
+        if timeSinceLastGeocode < minimumGeocodeInterval {
+            let delay = minimumGeocodeInterval - timeSinceLastGeocode
+            print("🕐 Throttling geocode request, waiting \(delay)s")
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        
+        // Prevent concurrent requests
+        guard !isGeocoding else {
+            print("⏳ Geocoding already in progress, skipping")
+            return nil
+        }
+        
+        isGeocoding = true
+        lastGeocodeTime = Date()
+        
+        defer {
+            isGeocoding = false
+        }
+        
         return await withCheckedContinuation { continuation in
-            performGeocoding(location: location) { building in
+            reverseGeocode(location: location) { building in
                 continuation.resume(returning: building)
             }
         }
@@ -202,7 +229,11 @@ class ReverseGeocoding: NSObject, ObservableObject {
             address: nil,
             category: .unknown,
             coordinates: location.coordinate,
-            confidence: 0.3
+            confidence: 0.3,
+            neighborhood: nil,
+            city: nil,
+            postalCode: nil,
+            country: nil
         )
         
         completion(fallbackBuilding)
@@ -348,20 +379,24 @@ class ReverseGeocoding: NSObject, ObservableObject {
             return cached
         }
         
-        // Check nearby locations (within 50m)
+        // Check nearby locations with improved boundary detection
         return findNearbyCachedBuilding(for: location)
     }
     
     private func findNearbyCachedBuilding(for location: CLLocation) -> BuildingInfo? {
-        // This is implemented in CacheManager's getCachedLocation method
-        if let cachedName = cacheManager.getCachedLocation(for: location.coordinate, radius: 50) {
-            // Reconstruct BuildingInfo from cached name
+        // Use CacheManager's spatial lookup with building-appropriate radius
+        if let cachedName = cacheManager.getCachedLocation(for: location.coordinate, radius: 30) {
+            // For buildings, use smaller radius (30m) for better accuracy
             return BuildingInfo(
                 name: cachedName,
                 address: nil,
                 category: .unknown,
                 coordinates: location.coordinate,
-                confidence: 0.8
+                confidence: 0.8,
+                neighborhood: nil,
+                city: nil,
+                postalCode: nil,
+                country: nil
             )
         }
         
@@ -369,12 +404,14 @@ class ReverseGeocoding: NSObject, ObservableObject {
     }
     
     private func cacheResult(_ building: BuildingInfo, for location: CLLocation) {
-        // Cache the full BuildingInfo
+        // Cache the full BuildingInfo with building-specific TTL
         let cacheKey = location.coordinate.cacheKey
-        cacheManager.set(building, for: cacheKey, namespace: .locations, ttl: 86400) // 24 hours
+        let ttl: TimeInterval = building.confidence > 0.8 ? 86400 : 3600 // 24h for high confidence, 1h for low
+        cacheManager.set(building, for: cacheKey, namespace: .locations, ttl: ttl)
         
-        // Also cache just the name for nearby lookups
-        cacheManager.cacheLocation(building.name, for: location.coordinate)
+        // Also cache just the name for nearby lookups with building name and confidence
+        let enrichedName = building.confidence > 0.8 ? building.name : "\(building.name) (uncertain)"
+        cacheManager.cacheLocation(enrichedName, for: location.coordinate)
     }
     
     // MARK: - Statistics
