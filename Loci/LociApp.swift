@@ -78,13 +78,21 @@ struct MainAppView: View {
                 }
                 .tag(1)
             
+            // Friends tab
+            FriendsView()
+                .tabItem {
+                    Image(systemName: "person.2.fill")
+                    Text("Friends")
+                }
+                .tag(2)
+            
             // Profile tab
             UserProfileView()
                 .tabItem {
                     Image(systemName: "person.fill")
                     Text("Profile")
                 }
-                .tag(2)
+                .tag(3)
         }
         .accentColor(.blue)
     }
