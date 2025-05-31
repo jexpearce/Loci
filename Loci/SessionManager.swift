@@ -26,7 +26,7 @@ class SessionManager: ObservableObject {
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     
     private init() {
-        setupBackgroundTasks()
+        //setupBackgroundTasks()
         setupNotifications()
     }
     
@@ -170,7 +170,7 @@ class SessionManager: ObservableObject {
         }
     }
     
-    private func handleBackgroundTask(task: BGTask) {
+    func handleBackgroundTask(task: BGTask) {
         // Schedule next background task
         scheduleNextBackgroundTask()
         

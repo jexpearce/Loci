@@ -10,18 +10,24 @@ struct LociApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var privacyManager = PrivacyManager.shared
     @StateObject private var matchingEngine = MatchingEngine.shared
-    
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(sessionManager)
-                .environmentObject(locationManager)
-                .environmentObject(spotifyManager)
-                .environmentObject(dataStore)
-                .preferredColorScheme(.dark)
-                .onAppear {
-                    setupApp()
+            Group {
+                if spotifyManager.isAuthenticated {
+                    ContentView()
+                        .environmentObject(sessionManager)
+                        .environmentObject(locationManager)
+                        .environmentObject(spotifyManager)
+                        .environmentObject(dataStore)
+                } else {
+                    SpotifyOnboardingView()
                 }
+            }
+            .preferredColorScheme(.dark)
+            .onAppear {
+                setupApp()
+            }
         }
     }
     

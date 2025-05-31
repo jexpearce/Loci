@@ -3,176 +3,220 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var dataStore: DataStore
-    @State private var selectedDuration: SessionDuration = .twelveHours
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var selectedDuration: SessionDuration = .oneHour
     @State private var showingSessionHistory = false
+    @State private var showingSettings = false
     
     var body: some View {
-        ZStack(alignment: .top) {
-            Color(hex: "0A001A").ignoresSafeArea()
-            VStack(spacing: 24) {
-                HStack {
-                    LociHeaderView()
-                    Spacer()
-                    SettingsIcon()
+        ZStack {
+            // Background
+            LociTheme.Colors.appBackground
+                .ignoresSafeArea()
+            
+            // Content
+            VStack(spacing: 0) {
+                // Header
+                HeaderView(showingSettings: $showingSettings)
+                    .padding(.horizontal, LociTheme.Spacing.medium)
+                    .padding(.top, LociTheme.Spacing.large)
+                    .padding(.bottom, LociTheme.Spacing.medium)
+                
+                // Main Content
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: LociTheme.Spacing.large) {
+                        if sessionManager.isSessionActive {
+                            ActiveSessionView()
+                        } else {
+                            SessionStartView(selectedDuration: $selectedDuration)
+                        }
+                        
+                        // Status Section
+                        StatusSection()
+                        
+                        // Recent Sessions
+                        if !dataStore.sessionHistory.isEmpty {
+                            RecentSessionsSection(showingSessionHistory: $showingSessionHistory)
+                        }
+                        
+                        // Social Activity
+                        SocialActivitySection()
+                    }
+                    .padding(.horizontal, LociTheme.Spacing.medium)
+                    .padding(.bottom, LociTheme.Spacing.xxLarge)
                 }
-                .padding(.horizontal)
-                .padding(.top, 24)
-                if sessionManager.isSessionActive {
-                    LiveIndicator()
-                }
-                SessionInfoLabel()
-                SessionDurationPicker(selectedDuration: $selectedDuration)
-                StartSessionButton(selectedDuration: $selectedDuration)
-                HStack(spacing: 12) {
-                    SpotifyStatusChip()
-                    LocationStatusChip()
-                }
-                RecentSessionPreview(showingSessionHistory: $showingSessionHistory)
-                SocialTeaserCard()
-                Spacer()
             }
         }
         .sheet(isPresented: $showingSessionHistory) {
             SessionHistoryView()
         }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+        }
     }
 }
 
-struct StartSessionView: View {
+// MARK: - Header View
+
+struct HeaderView: View {
+    @Binding var showingSettings: Bool
+    
+    var body: some View {
+        HStack {
+            Text("Loci")
+                .font(LociTheme.Typography.heading)
+                .foregroundColor(LociTheme.Colors.mainText)
+                .neonText()
+            
+            Spacer()
+            
+            Button(action: { showingSettings = true }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .padding(LociTheme.Spacing.xSmall)
+            }
+        }
+    }
+}
+
+// MARK: - Session Start View
+
+struct SessionStartView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @Binding var selectedDuration: SessionDuration
     
     var body: some View {
-        VStack(spacing: 40) {
-            // Duration Picker
-            VStack(spacing: 16) {
-                Text("Session Duration")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Session Info
+            VStack(spacing: LociTheme.Spacing.small) {
+                Image(systemName: "music.note.house")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    .glow(color: LociTheme.Colors.secondaryHighlight, radius: 12)
                 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
-                    ForEach(SessionDuration.allCases, id: \.self) { duration in
-                        DurationButton(
-                            duration: duration,
-                            isSelected: selectedDuration == duration,
-                            action: { selectedDuration = duration }
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
+                Text("Start a Tracking Session")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Loci will log your Spotify tracks and location every 90 seconds. You can stop anytime.")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.mainText.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, LociTheme.Spacing.medium)
+            }
+            .padding(.vertical, LociTheme.Spacing.medium)
+            
+            // Duration Picker
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Session Duration")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                DurationPicker(selectedDuration: $selectedDuration)
             }
             
             // Start Button
             Button(action: {
                 sessionManager.startSession(duration: selectedDuration)
             }) {
-                HStack(spacing: 12) {
+                HStack(spacing: LociTheme.Spacing.small) {
                     Image(systemName: "play.fill")
                     Text("Start Session")
                 }
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Color(hex: "121212"))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(Color(hex: "1DB954"))
-                .cornerRadius(12)
             }
-            .padding(.horizontal, 40)
+            .lociButton(.gradient, isFullWidth: true)
         }
+        .padding(.vertical, LociTheme.Spacing.medium)
     }
 }
 
-struct DurationButton: View {
-    let duration: SessionDuration
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            Text(duration.displayText)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(isSelected ? Color(hex: "121212") : .white)
-                .padding(.vertical, 12)
-                .padding(.horizontal, 20)
-                .background(isSelected ? Color(hex: "1DB954") : Color.white.opacity(0.1))
-                .cornerRadius(8)
-        }
-    }
-}
+// MARK: - Active Session View
 
 struct ActiveSessionView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var dataStore: DataStore
     
     var body: some View {
-        VStack(spacing: 30) {
-            // Session Status
-            VStack(spacing: 12) {
-                Text("Session Active")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(Color(hex: "1DB954"))
-                
-                if let endTime = sessionManager.sessionEndTime {
-                    TimeRemainingView(endTime: endTime)
-                }
-            }
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Live Indicator
+            LiveSessionIndicator(endTime: sessionManager.sessionEndTime)
             
-            // Current Stats
-            VStack(spacing: 20) {
-                StatCard(
-                    icon: "music.note",
-                    label: "Tracks Logged",
-                    value: "\(dataStore.currentSessionEvents.count)"
-                )
-                
-                if let lastEvent = dataStore.currentSessionEvents.last {
-                    LastTrackCard(event: lastEvent)
-                }
-            }
-            .padding(.horizontal, 40)
+            // Session Stats
+            SessionStatsView(events: dataStore.currentSessionEvents)
             
             // Stop Button
             Button(action: {
                 sessionManager.stopSession()
             }) {
-                HStack(spacing: 12) {
+                HStack(spacing: LociTheme.Spacing.small) {
                     Image(systemName: "stop.fill")
                     Text("End Session")
                 }
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
-                .padding(.vertical, 16)
-                .padding(.horizontal, 32)
-                .background(Color.red.opacity(0.2))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.red.opacity(0.5), lineWidth: 1)
-                )
-                .cornerRadius(8)
             }
+            .lociButton(.secondary, isFullWidth: true)
         }
+        .padding(.vertical, LociTheme.Spacing.medium)
     }
 }
 
-struct TimeRemainingView: View {
-    let endTime: Date
+// MARK: - Live Session Indicator
+
+struct LiveSessionIndicator: View {
+    let endTime: Date?
     @State private var timeRemaining = ""
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var body: some View {
-        Text(timeRemaining)
-            .font(.system(size: 36, weight: .light, design: .monospaced))
-            .foregroundColor(.white.opacity(0.9))
-            .onReceive(timer) { _ in
-                updateTimeRemaining()
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Pulsing Live Dot
+            HStack(spacing: LociTheme.Spacing.xSmall) {
+                Circle()
+                    .fill(LociTheme.Colors.notificationBadge)
+                    .frame(width: 8, height: 8)
+                    .glow(color: LociTheme.Colors.notificationBadge, radius: 6)
+                    .overlay(
+                        Circle()
+                            .stroke(LociTheme.Colors.notificationBadge.opacity(0.5), lineWidth: 2)
+                            .scaleEffect(1.5)
+                            .opacity(0.5)
+                            .animation(LociTheme.Animation.pulse, value: UUID())
+                    )
+                
+                Text("SESSION ACTIVE")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(LociTheme.Colors.notificationBadge)
             }
-            .onAppear {
-                updateTimeRemaining()
-            }
+            
+            // Timer
+            Text(timeRemaining)
+                .font(LociTheme.Typography.timer)
+                .foregroundColor(LociTheme.Colors.mainText)
+                .monospacedDigit()
+        }
+        .padding(.vertical, LociTheme.Spacing.large)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.large)
+                .fill(LociTheme.Colors.contentContainer)
+                .overlay(
+                    RoundedRectangle(cornerRadius: LociTheme.CornerRadius.large)
+                        .stroke(LociTheme.Colors.notificationBadge.opacity(0.3), lineWidth: 1)
+                )
+        )
+        .onReceive(timer) { _ in
+            updateTimeRemaining()
+        }
+        .onAppear {
+            updateTimeRemaining()
+        }
     }
     
     private func updateTimeRemaining() {
+        guard let endTime = endTime else { return }
         let remaining = endTime.timeIntervalSince(Date())
         if remaining > 0 {
             let hours = Int(remaining) / 3600
@@ -185,177 +229,315 @@ struct TimeRemainingView: View {
     }
 }
 
+// MARK: - Session Stats View
+
+struct SessionStatsView: View {
+    let events: [ListeningEvent]
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Stats Grid
+            HStack(spacing: LociTheme.Spacing.small) {
+                StatCard(
+                    icon: "music.note",
+                    value: "\(events.count)",
+                    label: "Tracks",
+                    color: LociTheme.Colors.secondaryHighlight
+                )
+                
+                StatCard(
+                    icon: "building.2",
+                    value: "\(uniqueLocations)",
+                    label: "Locations",
+                    color: LociTheme.Colors.primaryAction
+                )
+            }
+            
+            // Last Track
+            if let lastEvent = events.last {
+                LastTrackView(event: lastEvent)
+            }
+        }
+    }
+    
+    private var uniqueLocations: Int {
+        Set(events.compactMap { $0.buildingName }).count
+    }
+}
+
+// MARK: - Stat Card
+
 struct StatCard: View {
     let icon: String
-    let label: String
     let value: String
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.xSmall) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .light))
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(LociTheme.Typography.statNumber)
+                .foregroundColor(LociTheme.Colors.mainText)
+            
+            Text(label)
+                .font(LociTheme.Typography.caption)
+                .foregroundColor(LociTheme.Colors.subheadText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.contentContainer)
+        .cornerRadius(LociTheme.CornerRadius.medium)
+    }
+}
+
+// MARK: - Last Track View
+
+struct LastTrackView: View {
+    let event: ListeningEvent
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
+            Text("NOW PLAYING")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Text(event.trackName)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.mainText)
+                .lineLimit(1)
+            
+            Text(event.artistName)
+                .font(LociTheme.Typography.caption)
+                .foregroundColor(LociTheme.Colors.mainText.opacity(0.8))
+                .lineLimit(1)
+            
+            if let building = event.buildingName {
+                HStack(spacing: LociTheme.Spacing.xxSmall) {
+                    Image(systemName: "building.2")
+                        .font(.system(size: 10))
+                    Text(building)
+                        .font(.system(size: 10))
+                        .lineLimit(1)
+                }
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer, shadowEnabled: false)
+    }
+}
+
+// MARK: - Status Section
+
+struct StatusSection: View {
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var locationManager: LocationManager
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            LociChip(
+                text: spotifyManager.isAuthenticated ? "Spotify Connected" : "Connect Spotify",
+                icon: spotifyManager.isAuthenticated ? "checkmark.circle" : "exclamationmark.triangle",
+                isActive: spotifyManager.isAuthenticated,
+                action: spotifyManager.isAuthenticated ? nil : {
+                    spotifyManager.startAuthorization()
+                }
+            )
+            
+            LociChip(
+                text: locationManager.authorizationStatus == .authorizedAlways ? "Location Enabled" : "Enable Location",
+                icon: locationManager.authorizationStatus == .authorizedAlways ? "checkmark.circle" : "exclamationmark.triangle",
+                isActive: locationManager.authorizationStatus == .authorizedAlways,
+                action: locationManager.authorizationStatus == .authorizedAlways ? nil : {
+                    locationManager.requestPermissions()
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Recent Sessions Section
+
+struct RecentSessionsSection: View {
+    @EnvironmentObject var dataStore: DataStore
+    @Binding var showingSessionHistory: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.small) {
+            Text("Recent Sessions")
+                .font(LociTheme.Typography.subheading)
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                ForEach(dataStore.sessionHistory.prefix(2)) { session in
+                    RecentSessionCard(session: session)
+                }
+            }
+            
+            Button(action: { showingSessionHistory = true }) {
+                Text("View All History")
+                    .font(LociTheme.Typography.buttonSmall)
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+            .padding(.top, LociTheme.Spacing.xxSmall)
+        }
+    }
+}
+
+// MARK: - Recent Session Card
+
+struct RecentSessionCard: View {
+    let session: Session
     
     var body: some View {
         HStack {
-            Image(systemName: icon)
-                .font(.system(size: 24))
-                .foregroundColor(Color(hex: "1DB954"))
-                .frame(width: 40)
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text(session.startTime.formatted(date: .abbreviated, time: .shortened))
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("\(session.events.count) tracks • \(session.duration.displayText)")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label)
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.6))
-                Text(value)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.subheadText)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
+// MARK: - Social Activity Section
+
+struct SocialActivitySection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.small) {
+            Text("Nearby Activity")
+                .font(LociTheme.Typography.subheading)
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            SocialActivityCard()
+        }
+    }
+}
+
+// MARK: - Social Activity Card
+
+struct SocialActivityCard: View {
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Circle()
+                .fill(LociTheme.Colors.notificationBadge)
+                .frame(width: 8, height: 8)
+                .glow(color: LociTheme.Colors.notificationBadge, radius: 4)
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text("3 people tracking now")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Top song in this building: 'Neon Skyline'")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
             }
             
             Spacer()
         }
-        .padding()
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(10)
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.secondaryCardBackground)
     }
 }
 
-struct LastTrackCard: View {
-    let event: ListeningEvent
+// MARK: - Duration Picker
+
+struct DurationPicker: View {
+    @Binding var selectedDuration: SessionDuration
+    
+    let durations: [SessionDuration] = [
+        .thirtyMinutes,
+        .oneHour,
+        .twoHours,
+        .fourHours,
+        .eightHours,
+        .twelveHours
+    ]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Last Track")
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.6))
-            
-            Text(event.trackName)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white)
-                .lineLimit(1)
-            
-            Text(event.artistName)
-                .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.8))
-                .lineLimit(1)
-            
-            if let building = event.buildingName {
-                HStack(spacing: 4) {
-                    Image(systemName: "building.2")
-                        .font(.system(size: 12))
-                    Text(building)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
+        LazyVGrid(columns: [
+            GridItem(.flexible()),
+            GridItem(.flexible()),
+            GridItem(.flexible())
+        ], spacing: LociTheme.Spacing.small) {
+            ForEach(durations, id: \.self) { duration in
+                DurationButton(
+                    duration: duration,
+                    isSelected: selectedDuration == duration
+                ) {
+                    selectedDuration = duration
                 }
-                .foregroundColor(Color(hex: "1DB954"))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(10)
     }
 }
 
-struct SessionHistoryView: View {
-    @EnvironmentObject var dataStore: DataStore
+// MARK: - Duration Button
+
+struct DurationButton: View {
+    let duration: SessionDuration
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(duration.displayText)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(isSelected ? LociTheme.Colors.appBackground : LociTheme.Colors.mainText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, LociTheme.Spacing.small)
+                .background(
+                    RoundedRectangle(cornerRadius: LociTheme.CornerRadius.small)
+                        .fill(isSelected ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState)
+                )
+        }
+    }
+}
+
+// MARK: - Settings View Placeholder
+
+struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
         NavigationView {
             ZStack {
-                Color(hex: "121212")
+                LociTheme.Colors.appBackground
                     .ignoresSafeArea()
                 
-                if dataStore.sessionHistory.isEmpty {
-                    Text("No sessions yet")
-                        .font(.system(size: 18))
-                        .foregroundColor(.white.opacity(0.5))
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 16) {
-                            ForEach(dataStore.sessionHistory) { session in
-                                SessionHistoryCard(session: SessionData(
-                                    id: session.id,
-                                    startTime: session.startTime,
-                                    endTime: session.endTime,
-                                    duration: session.duration,
-                                    events: session.events
-                                ))
-                            }
-                        }
-                        .padding()
-                    }
-                }
+                Text("Settings Coming Soon")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
             }
-            .navigationTitle("Session History")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
-                    .foregroundColor(Color(hex: "1DB954"))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
                 }
             }
         }
     }
 }
 
-struct SessionHistoryCard: View {
-    let session: SessionData
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(session.startTime.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Text(session.duration.displayText)
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(hex: "1DB954"))
-            }
-            
-            HStack(spacing: 20) {
-                Label("\(session.events.count) tracks", systemImage: "music.note")
-                Label("\(session.uniqueLocations) locations", systemImage: "map")
-            }
-            .font(.system(size: 14))
-            .foregroundColor(.white.opacity(0.7))
-            
-            if let topArtist = session.topArtist {
-                Text("Top Artist: \(topArtist)")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-        }
-        .padding()
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(12)
-    }
-}
-
-// Color Extension
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3: // RGB (12-bit)
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (1, 1, 1, 0)
-        }
-        
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue:  Double(b) / 255,
-            opacity: Double(a) / 255
-        )
-    }
-}
