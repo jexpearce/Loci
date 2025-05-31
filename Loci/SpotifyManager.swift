@@ -338,6 +338,32 @@ class SpotifyManager: NSObject, ObservableObject {
             .replacingOccurrences(of: "/", with: "_")
             .trimmingCharacters(in: CharacterSet(charactersIn: "="))
     }
+    
+    // MARK: - Session Mode Support Methods
+    
+    /// Reconcile partial events for active mode sessions
+    func reconcilePartialEvents(within startTime: Date, end endTime: Date, completion: @escaping ([ListeningEvent]) -> Void) {
+        // For now, return empty array - this would need to be implemented based on your specific needs
+        // This is a placeholder to satisfy the SessionManager requirements
+        completion([])
+    }
+    
+    /// Fetch recently played tracks for passive mode sessions
+    func fetchRecentlyPlayed(after startTime: Date, before endTime: Date, completion: @escaping ([TrackData]) -> Void) {
+        // For now, return empty array - this would need to be implemented based on your specific needs
+        // This is a placeholder to satisfy the SessionManager requirements
+        completion([])
+    }
+}
+
+// MARK: - Supporting Types for Session Modes
+
+struct TrackData {
+    let id: String
+    let title: String
+    let artist: String
+    let album: String
+    let playedAt: Date
 }
 
 // MARK: — ASWebAuthentication Presentation

@@ -16,6 +16,9 @@ class LocationManager: NSObject, ObservableObject {
     private var geocodeCache = [CLLocationCoordinate2D: String]()
     private let cacheDistance: CLLocationDistance = 50 // meters
     
+    // Add one-time location completion handler
+    private var oneTimeCompletion: ((CLLocation?) -> Void)?
+    
     private override init() {
         super.init()
         setupLocationManager()
@@ -68,6 +71,18 @@ class LocationManager: NSObject, ObservableObject {
         locationManager.stopMonitoringSignificantLocationChanges()
         
         print("📍 Stopped location tracking")
+    }
+    
+    /// Requests a single location fix, then calls the completion once.
+    func requestOneTimeLocation(completion: @escaping (CLLocation?) -> Void) {
+        let status = CLLocationManager.authorizationStatus()
+        guard status == .authorizedAlways || status == .authorizedWhenInUse else {
+            locationManager.requestWhenInUseAuthorization()
+            oneTimeCompletion = completion
+            return
+        }
+        oneTimeCompletion = completion
+        locationManager.requestLocation()
     }
     
     // MARK: - Reverse Geocoding
@@ -189,15 +204,40 @@ extension LocationManager: CLLocationManagerDelegate {
         }
         
         currentLocation = location
+        
+        // If there's a pending "oneTimeCompletion", call it exactly once and clear it
+        if let completion = oneTimeCompletion {
+            completion(location)
+            oneTimeCompletion = nil
+            return
+        }
+
+        // Otherwise, fall back to your existing "continuous" logic (if any)
         print("📍 Location updated: \(location.coordinate.latitude), \(location.coordinate.longitude)")
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // If we were waiting for a one‐time fix, inform the caller of failure
+        if let completion = oneTimeCompletion {
+            completion(nil)
+            oneTimeCompletion = nil
+            return
+        }
+
+        // Otherwise, handle error as you already did for continuous tracking
         print("❌ Location error: \(error.localizedDescription)")
     }
     
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
+        
+        // If user just granted permission and a one-time request is pending, request again
+        if let completion = oneTimeCompletion {
+            let status = manager.authorizationStatus
+            if status == .authorizedAlways || status == .authorizedWhenInUse {
+                manager.requestLocation()
+            }
+        }
         
         switch authorizationStatus {
         case .authorizedAlways:

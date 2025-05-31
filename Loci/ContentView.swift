@@ -6,7 +6,6 @@ struct ContentView: View {
     @EnvironmentObject var spotifyManager: SpotifyManager
     @EnvironmentObject var locationManager: LocationManager
     
-    @State private var selectedDuration: SessionDuration = .oneHour
     @State private var showingSessionHistory = false
     @State private var showingSettings = false
     
@@ -30,7 +29,7 @@ struct ContentView: View {
                         if sessionManager.isSessionActive {
                             ActiveSessionView()
                         } else {
-                            SessionStartView(selectedDuration: $selectedDuration)
+                            SessionModeSelectionView()
                         }
                         
                         // Status Section
@@ -82,12 +81,9 @@ struct HeaderView: View {
     }
 }
 
-// MARK: - Session Start View
+// MARK: - Session Mode Selection View
 
-struct SessionStartView: View {
-    @EnvironmentObject var sessionManager: SessionManager
-    @Binding var selectedDuration: SessionDuration
-    
+struct SessionModeSelectionView: View {
     var body: some View {
         VStack(spacing: LociTheme.Spacing.large) {
             // Session Info
@@ -101,7 +97,7 @@ struct SessionStartView: View {
                     .font(LociTheme.Typography.subheading)
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("Loci will log your Spotify tracks and location every 90 seconds. You can stop anytime.")
+                Text("Loci will log your Spotify tracks and location every 90 seconds. Session will auto-stop after 6 hours or you can stop anytime.")
                     .font(LociTheme.Typography.caption)
                     .foregroundColor(LociTheme.Colors.mainText.opacity(0.8))
                     .multilineTextAlignment(.center)
@@ -109,25 +105,26 @@ struct SessionStartView: View {
             }
             .padding(.vertical, LociTheme.Spacing.medium)
             
-            // Duration Picker
-            VStack(spacing: LociTheme.Spacing.small) {
-                Text("Session Duration")
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-                
-                DurationPicker(selectedDuration: $selectedDuration)
-            }
-            
-            // Start Button
-            Button(action: {
-                sessionManager.startSession(duration: selectedDuration)
-            }) {
-                HStack(spacing: LociTheme.Spacing.small) {
-                    Image(systemName: "play.fill")
-                    Text("Start Session")
+            // Session Mode Buttons
+            HStack(spacing: LociTheme.Spacing.medium) {
+                Button(action: {
+                    // Implement the action for starting a session in active mode
+                }) {
+                    Text("Start Live Session")
+                        .font(LociTheme.Typography.button)
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
                 }
+                .lociButton(.gradient, isFullWidth: true)
+                
+                Button(action: {
+                    // Implement the action for starting a session in passive mode
+                }) {
+                    Text("Start Passive Session")
+                        .font(LociTheme.Typography.button)
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+                .lociButton(.secondary, isFullWidth: true)
             }
-            .lociButton(.gradient, isFullWidth: true)
         }
         .padding(.vertical, LociTheme.Spacing.medium)
     }
@@ -455,60 +452,6 @@ struct SocialActivityCard: View {
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard(backgroundColor: LociTheme.Colors.secondaryCardBackground)
-    }
-}
-
-// MARK: - Duration Picker
-
-struct DurationPicker: View {
-    @Binding var selectedDuration: SessionDuration
-    
-    let durations: [SessionDuration] = [
-        .thirtyMinutes,
-        .oneHour,
-        .twoHours,
-        .fourHours,
-        .eightHours,
-        .twelveHours
-    ]
-    
-    var body: some View {
-        LazyVGrid(columns: [
-            GridItem(.flexible()),
-            GridItem(.flexible()),
-            GridItem(.flexible())
-        ], spacing: LociTheme.Spacing.small) {
-            ForEach(durations, id: \.self) { duration in
-                DurationButton(
-                    duration: duration,
-                    isSelected: selectedDuration == duration
-                ) {
-                    selectedDuration = duration
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Duration Button
-
-struct DurationButton: View {
-    let duration: SessionDuration
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            Text(duration.displayText)
-                .font(LociTheme.Typography.body)
-                .foregroundColor(isSelected ? LociTheme.Colors.appBackground : LociTheme.Colors.mainText)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, LociTheme.Spacing.small)
-                .background(
-                    RoundedRectangle(cornerRadius: LociTheme.CornerRadius.small)
-                        .fill(isSelected ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState)
-                )
-        }
     }
 }
 

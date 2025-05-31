@@ -1,6 +1,14 @@
 import Foundation
 import SwiftData
 
+// MARK: - Session Mode
+
+enum SessionMode: String, CaseIterable, Codable {
+    case manual    // "Manual/Region" mode: user picks building/region from a map
+    case passive   // One-time GPS ping, pin that building for entire session
+    case active    // Continuous (~90s) tracking + partial events
+}
+
 // MARK: - SwiftData Models
 
 @Model
@@ -9,12 +17,14 @@ class Session {
     var startTime: Date
     var endTime: Date
     var durationRaw: String
+    var mode: SessionMode
     @Relationship(deleteRule: .cascade) var events: [ListeningEvent] = []
 
-    init(startTime: Date, endTime: Date, duration: SessionDuration, events: [ListeningEvent] = []) {
+    init(startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent] = []) {
         self.startTime = startTime
         self.endTime = endTime
         self.durationRaw = duration.rawValue
+        self.mode = mode
         self.events = events
     }
 
@@ -113,6 +123,7 @@ enum SessionDuration: String, CaseIterable, Codable {
     case oneHour = "1hr"
     case twoHours = "2hr"
     case fourHours = "4hr"
+    case sixHours = "6hr"
     case eightHours = "8hr"
     case twelveHours = "12hr"
     case sixteenHours = "16hr"
@@ -123,6 +134,7 @@ enum SessionDuration: String, CaseIterable, Codable {
         case .oneHour: return "1 hr"
         case .twoHours: return "2 hrs"
         case .fourHours: return "4 hrs"
+        case .sixHours: return "6 hrs"
         case .eightHours: return "8 hrs"
         case .twelveHours: return "12 hrs"
         case .sixteenHours: return "16 hrs"
@@ -135,6 +147,7 @@ enum SessionDuration: String, CaseIterable, Codable {
         case .oneHour: return 60 * 60
         case .twoHours: return 2 * 60 * 60
         case .fourHours: return 4 * 60 * 60
+        case .sixHours: return 6 * 60 * 60
         case .eightHours: return 8 * 60 * 60
         case .twelveHours: return 12 * 60 * 60
         case .sixteenHours: return 16 * 60 * 60

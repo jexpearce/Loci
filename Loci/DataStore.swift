@@ -11,6 +11,7 @@ class DataStore: ObservableObject {
 
     @Published var currentSessionEvents: [ListeningEvent] = []
     @Published var sessionHistory: [Session] = []
+    fileprivate var singleSessionBuildingName: String?
 
     private init() {
         self.container = try! ModelContainer(
@@ -34,14 +35,25 @@ class DataStore: ObservableObject {
     func clearCurrentSession() {
         Task { @MainActor in
             currentSessionEvents.removeAll()
+            singleSessionBuildingName = nil
         }
+    }
+    
+    func setSingleSessionBuilding(_ name: String) {
+        singleSessionBuildingName = name
     }
 
     // MARK: - Session History Management
 
-    func saveSession(startTime: Date, endTime: Date, duration: SessionDuration) {
+    func saveSession(startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent]) {
         Task { @MainActor in
-            let session = Session(startTime: startTime, endTime: endTime, duration: duration, events: currentSessionEvents)
+            let session = Session(
+                startTime: startTime,
+                endTime: endTime,
+                duration: duration,
+                mode: mode,
+                events: events
+            )
             container.mainContext.insert(session)
             try? container.mainContext.save()
 
@@ -57,6 +69,7 @@ class DataStore: ObservableObject {
                 startTime: sessionData.startTime,
                 endTime: sessionData.endTime,
                 duration: sessionData.duration,
+                mode: .active, // Default to active for existing SessionData
                 events: sessionData.events
             )
             session.id = sessionData.id

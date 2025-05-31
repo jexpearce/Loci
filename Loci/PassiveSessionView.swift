@@ -10,7 +10,6 @@ struct PassiveSessionView: View {
     @EnvironmentObject var dataStore: DataStore
     @EnvironmentObject var analyticsEngine: AnalyticsEngine
     
-    @State private var selectedDuration: SessionDuration = .oneHour
     @State private var selectedLocation: SelectedLocation?
     @State private var showingLocationPicker = false
     @State private var showingManualEntry = false
@@ -42,17 +41,13 @@ struct PassiveSessionView: View {
                         onManualSelect: { showingLocationPicker = true }
                     )
                     
-                    // Duration Picker
-                    DurationSelectionCard(selectedDuration: $selectedDuration)
-                    
                     // Session Info
-                    SessionInfoCard(location: selectedLocation, duration: selectedDuration)
+                    SessionInfoCard(location: selectedLocation)
                     
                     // Start Button
                     StartPassiveSessionButton(
                         canStart: selectedLocation != nil,
                         location: selectedLocation,
-                        duration: selectedDuration,
                         onStart: startSession
                     )
                     
@@ -126,11 +121,8 @@ struct PassiveSessionView: View {
     private func startSession() {
         guard let location = selectedLocation else { return }
         
-        // Create passive session with fixed location
-        PassiveSessionManager.shared.startPassiveSession(
-            location: location,
-            duration: selectedDuration
-        )
+        // Start passive session using the new SessionManager method
+        sessionManager.startSession(mode: .passive, manualRegion: location.buildingInfo.name)
     }
 }
 
@@ -314,57 +306,10 @@ struct LocationSelectionOptions: View {
     }
 }
 
-// MARK: - Duration Selection Card
-
-struct DurationSelectionCard: View {
-    @Binding var selectedDuration: SessionDuration
-    
-    let durations: [SessionDuration] = [
-        .thirtyMinutes,
-        .oneHour,
-        .twoHours,
-        .fourHours,
-        .eightHours,
-        .twelveHours
-    ]
-    
-    var body: some View {
-        VStack(spacing: LociTheme.Spacing.medium) {
-            HStack {
-                Label("Duration", systemImage: "clock")
-                    .font(LociTheme.Typography.subheading)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-                
-                Spacer()
-            }
-            
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: LociTheme.Spacing.small) {
-                ForEach(durations, id: \.self) { duration in
-                    DurationButton(
-                        duration: duration,
-                        isSelected: selectedDuration == duration
-                    ) {
-                        withAnimation(LociTheme.Animation.smoothEaseInOut) {
-                            selectedDuration = duration
-                        }
-                    }
-                }
-            }
-        }
-        .padding(LociTheme.Spacing.medium)
-        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
-    }
-}
-
 // MARK: - Session Info Card
 
 struct SessionInfoCard: View {
     let location: SelectedLocation?
-    let duration: SessionDuration
     
     var body: some View {
         VStack(alignment: .leading, spacing: LociTheme.Spacing.small) {
@@ -425,7 +370,6 @@ struct InfoItem: View {
 struct StartPassiveSessionButton: View {
     let canStart: Bool
     let location: SelectedLocation?
-    let duration: SessionDuration
     let onStart: () -> Void
     
     var body: some View {
@@ -775,31 +719,5 @@ struct LociTextFieldStyle: TextFieldStyle {
             .background(LociTheme.Colors.contentContainer)
             .cornerRadius(LociTheme.CornerRadius.small)
             .foregroundColor(LociTheme.Colors.mainText)
-    }
-}
-
-// MARK: - Passive Session Manager
-
-class PassiveSessionManager: ObservableObject {
-    static let shared = PassiveSessionManager()
-    
-    @Published var isPassiveSessionActive = false
-    @Published var sessionLocation: SelectedLocation?
-    @Published var sessionStartTime: Date?
-    @Published var sessionEndTime: Date?
-    
-    private init() {}
-    
-    func startPassiveSession(location: SelectedLocation, duration: SessionDuration) {
-        sessionLocation = location
-        sessionStartTime = Date()
-        sessionEndTime = Date().addingTimeInterval(duration.timeInterval)
-        isPassiveSessionActive = true
-        
-        // Start the session through main SessionManager
-        SessionManager.shared.startSession(duration: duration)
-        
-        // Log the fixed location for this session
-        print("📍 Passive session started at: \(location.buildingInfo.name)")
     }
 }
