@@ -182,29 +182,6 @@ struct LocationDiscoveryView: View {
     }
 }
 
-struct StatItem: View {
-    let icon: String
-    let value: String
-    let label: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.blue)
-            
-            Text(value)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
-            
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
 struct BuildingActivityCard: View {
     let activity: BuildingActivity
     let onTap: () -> Void

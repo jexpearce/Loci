@@ -40,7 +40,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Session Mode Analytics (New)
     
-    func generateSessionModeComparison() -> SessionModeComparison {
+    @MainActor func generateSessionModeComparison() -> SessionModeComparison {
         let sessions = dataStore.sessionHistory
         
         let onePlaceSessions = sessions.filter { $0.mode == .onePlace }
@@ -138,7 +138,7 @@ class AnalyticsEngine: ObservableObject {
     
     // MARK: - Building Change Analytics (New)
     
-    func analyzeBuildingChangePatterns() -> BuildingChangeAnalytics {
+    @MainActor func analyzeBuildingChangePatterns() -> BuildingChangeAnalytics {
         let sessions = dataStore.sessionHistory.filter { $0.mode == .onePlace }
         let allChanges = sessions.flatMap { $0.buildingChanges }
         
@@ -972,10 +972,6 @@ struct TrendReport: Codable {
     let risingTracks: [TrendingItem]
     let risingGenres: [TrendingItem]
     let hotLocations: [HotLocation]
-}
-
-enum BuildingCategory: String, Codable {
-    case office, residential, cafe, retail, gym, library, other, unknown
 }
 
 private class AnalyticsCache {

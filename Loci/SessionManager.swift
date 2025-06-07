@@ -370,7 +370,7 @@ class SessionManager: ObservableObject {
         }
     }
     
-    private func performLocationUpdate() {
+    func performLocationUpdate() {
         let bgTaskID = BackgroundTaskManager.shared.beginTask("com.loci.sessionUpdate")
         defer { BackgroundTaskManager.shared.endTask(bgTaskID) }
 

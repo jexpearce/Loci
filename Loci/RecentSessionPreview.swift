@@ -4,8 +4,8 @@ struct RecentSessionPreview: View {
     @Binding var showingSessionHistory: Bool
     // Placeholder data
     let recentSessions: [SessionData] = [
-        SessionData(id: UUID(), startTime: Date().addingTimeInterval(-3600), endTime: Date(), duration: .oneHour, events: []),
-        SessionData(id: UUID(), startTime: Date().addingTimeInterval(-7200), endTime: Date().addingTimeInterval(-3600), duration: .oneHour, events: [])
+        SessionData(id: UUID(), startTime: Date().addingTimeInterval(-3600), endTime: Date(), duration: .oneHour, mode: .onePlace, events: [], buildingChanges: [], isActive: false),
+        SessionData(id: UUID(), startTime: Date().addingTimeInterval(-7200), endTime: Date().addingTimeInterval(-3600), duration: .oneHour, mode: .onTheMove, events: [], buildingChanges: [], isActive: false)
     ]
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

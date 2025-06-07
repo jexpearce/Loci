@@ -15,7 +15,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             using: nil
         ) { task in
             // Forward the work to SessionManager
-            SessionManager.shared.handleBackgroundTask(task: task)
+            // Handle background task for session updates
+            if SessionManager.shared.isSessionActive {
+                SessionManager.shared.performLocationUpdate()
+            }
+            task.setTaskCompleted(success: true)
         }
 
         return true

@@ -109,7 +109,7 @@ final class ListeningEvent {
     var spotifyTrackId: String
     
     // New property for better tracking
-    var sessionMode: SessionMode = .unknown
+    var sessionMode: SessionMode = SessionMode.unknown
 
     init(timestamp: Date,
          latitude: Double,
@@ -244,7 +244,7 @@ enum SpotifyImportMode: String, CaseIterable, Codable {
 // MARK: - Non-SwiftData Models
 
 // SessionData is used for in-memory operations and data transfer
-struct SessionData: Identifiable, Codable {
+struct SessionData: Identifiable {
     let id: UUID
     let startTime: Date
     let endTime: Date
@@ -299,6 +299,69 @@ struct SessionData: Identifiable, Codable {
         return events.last?.buildingName
     }
 }
+extension SessionData: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, startTime, endTime, duration, mode, events, buildingChanges, isActive
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        startTime = try container.decode(Date.self, forKey: .startTime)
+        endTime = try container.decode(Date.self, forKey: .endTime)
+        duration = try container.decode(SessionDuration.self, forKey: .duration)
+        mode = try container.decode(SessionMode.self, forKey: .mode)
+        events = try container.decode([ListeningEvent].self, forKey: .events)
+        let exportedChanges = try container.decodeIfPresent([BuildingChangeExport].self, forKey: .buildingChanges) ?? []
+        buildingChanges = exportedChanges.map { exportChange in
+            BuildingChange(
+                timestamp: exportChange.timestamp,
+                fromBuilding: exportChange.fromBuildingName,
+                toBuilding: exportChange.toBuildingName,
+                fromCoordinate: exportChange.fromLatitude != nil && exportChange.fromLongitude != nil ?
+                    (lat: exportChange.fromLatitude!, lon: exportChange.fromLongitude!) : nil,
+                toCoordinate: (lat: exportChange.toLatitude, lon: exportChange.toLongitude),
+                autoDetected: exportChange.wasAutoDetected
+            )
+        }
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(startTime, forKey: .startTime)
+        try container.encode(endTime, forKey: .endTime)
+        try container.encode(duration, forKey: .duration)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(events, forKey: .events)
+        try container.encode(buildingChanges.map(BuildingChangeExport.init), forKey: .buildingChanges)
+        try container.encode(isActive, forKey: .isActive)
+    }
+}
+struct BuildingChangeExport: Codable {
+    let id: UUID
+    let timestamp: Date
+    let fromBuildingName: String?
+    let toBuildingName: String
+    let fromLatitude: Double?
+    let fromLongitude: Double?
+    let toLatitude: Double
+    let toLongitude: Double
+    let wasAutoDetected: Bool
+    
+    init(from buildingChange: BuildingChange) {
+        self.id = buildingChange.id
+        self.timestamp = buildingChange.timestamp
+        self.fromBuildingName = buildingChange.fromBuildingName
+        self.toBuildingName = buildingChange.toBuildingName
+        self.fromLatitude = buildingChange.fromLatitude
+        self.fromLongitude = buildingChange.fromLongitude
+        self.toLatitude = buildingChange.toLatitude
+        self.toLongitude = buildingChange.toLongitude
+        self.wasAutoDetected = buildingChange.wasAutoDetected
+    }
+}
 
 // MARK: - Extensions for Codable support
 
@@ -350,26 +413,6 @@ extension ListeningEvent: Codable {
             sessionMode: sessionMode
         )
         self.id = id
-    }
-}
-
-extension BuildingChange: Codable {
-    enum CodingKeys: String, CodingKey {
-        case id, timestamp, fromBuildingName, toBuildingName
-        case fromLatitude, fromLongitude, toLatitude, toLongitude, wasAutoDetected
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(timestamp, forKey: .timestamp)
-        try container.encodeIfPresent(fromBuildingName, forKey: .fromBuildingName)
-        try container.encode(toBuildingName, forKey: .toBuildingName)
-        try container.encodeIfPresent(fromLatitude, forKey: .fromLatitude)
-        try container.encodeIfPresent(fromLongitude, forKey: .fromLongitude)
-        try container.encode(toLatitude, forKey: .toLatitude)
-        try container.encode(toLongitude, forKey: .toLongitude)
-        try container.encode(wasAutoDetected, forKey: .wasAutoDetected)
     }
 }
 

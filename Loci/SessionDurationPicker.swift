@@ -136,8 +136,8 @@ struct DurationChip: View {
         RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
             .fill(
                 isSelected
-                    ? LociTheme.Colors.primaryGradient
-                    : (isRecommended ? LociTheme.Colors.secondaryHighlight.opacity(0.1) : LociTheme.Colors.disabledState)
+                    ? AnyShapeStyle(LociTheme.Colors.primaryGradient)
+                    : AnyShapeStyle(isRecommended ? LociTheme.Colors.secondaryHighlight.opacity(0.1) : LociTheme.Colors.disabledState)
             )
     }
     

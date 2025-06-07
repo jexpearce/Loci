@@ -228,7 +228,10 @@ class PrivacyManager: ObservableObject {
                     startTime: session.startTime,
                     endTime: session.endTime,
                     duration: session.duration,
-                    events: session.events
+                    mode: session.mode,
+                    events: session.events,
+                    buildingChanges: session.buildingChanges,
+                    isActive: session.isActive
                 )
             },
             privacySettings: privacySettings,

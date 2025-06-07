@@ -325,8 +325,8 @@ struct LocationAssignmentCard: View {
                 Spacer()
             }
             
-            if let location = selectedLocation {
-                SelectedLocationDisplay(location: location) {
+            if let locationName = selectedLocation {
+                SimpleSelectedLocationDisplay(locationName: locationName) {
                     selectedLocation = nil
                 }
             } else {
@@ -602,5 +602,93 @@ struct LocationSelectionView: View {
                 }
             }
         }
+    }
+}
+// MARK: - Reused Components (from OnePlaceSessionView)
+
+struct SelectedLocationDisplay: View {
+    let location: SelectedLocation
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
+                Text(location.buildingInfo.name)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                if let address = location.buildingInfo.address {
+                    Text(address)
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer()
+            
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(LociTheme.Colors.disabledState)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.small)
+    }
+}
+
+struct LocationSelectionButtons: View {
+    @Binding var showingLocationPicker: Bool
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            Button("Use Current Location") {
+                // This would be handled by parent view
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(LociTheme.Colors.disabledState.opacity(0.3))
+            .cornerRadius(LociTheme.CornerRadius.small)
+            
+            Button(action: { showingLocationPicker = true }) {
+                Text("Select on Map")
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(LociTheme.Colors.disabledState.opacity(0.3))
+            .cornerRadius(LociTheme.CornerRadius.small)
+        }
+    }
+}
+
+struct SimpleSelectedLocationDisplay: View {
+    let locationName: String
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
+                Text(locationName)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Selected location")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+            
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(LociTheme.Colors.disabledState)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.small)
     }
 }
