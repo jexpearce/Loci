@@ -53,6 +53,8 @@ struct SpotifyTrack: Identifiable, Codable {
     let imageURL: String?
 }
 
+// MARK: - API Response Models
+
 private struct TokenResponse: Decodable {
     let access_token: String
     let token_type: String
@@ -81,11 +83,37 @@ private struct CurrentlyPlayingResponse: Decodable {
 
 private struct RecentlyPlayedResponse: Decodable {
     let items: [RecentlyPlayedItem]
+    let next: String?
 }
 
 private struct RecentlyPlayedItem: Decodable {
     let track: Track
     let played_at: String
+}
+
+private struct PlaylistsResponse: Decodable {
+    let items: [PlaylistItem]
+}
+
+private struct PlaylistItem: Decodable {
+    let id: String
+    let name: String
+    let description: String?
+    let tracks: PlaylistTracks
+}
+
+private struct PlaylistTracks: Decodable {
+    let total: Int
+}
+
+private struct PlaylistTracksResponse: Decodable {
+    let items: [PlaylistTrackItem]
+    let next: String?
+}
+
+private struct PlaylistTrackItem: Decodable {
+    let track: Track?
+    let added_at: String
 }
 
 struct TracksResponse: Decodable {
@@ -125,7 +153,9 @@ class SpotifyManager: NSObject, ObservableObject {
     private let redirectURI    = "loci://spotify-callback"
     private let scopes         = [
         "user-read-currently-playing",
-        "user-read-recently-played"
+        "user-read-recently-played",
+        "playlist-read-private",
+        "playlist-read-collaborative"
     ].joined(separator: " ")
 
     // PKCE
@@ -146,6 +176,7 @@ class SpotifyManager: NSObject, ObservableObject {
     // Published state
     @Published var isAuthenticated = false
     @Published var currentTrack: SpotifyTrack?
+    @Published var userPlaylists: [SpotifyPlaylist] = []
 
     private override init() {
         super.init()
@@ -197,7 +228,11 @@ class SpotifyManager: NSObject, ObservableObject {
         Task {
             do {
                 try await exchangeCodeForTokens(code: code)
-                DispatchQueue.main.async { self.isAuthenticated = true }
+                DispatchQueue.main.async { 
+                    self.isAuthenticated = true
+                    // Load user playlists after authentication
+                    Task { await self.loadUserPlaylists() }
+                }
             } catch {
                 print("❌ Token exchange failed:", error)
             }
@@ -228,6 +263,64 @@ class SpotifyManager: NSObject, ObservableObject {
                 print("❌ fetchCurrentlyPlaying error:", error)
                 DispatchQueue.main.async { completion(nil) }
             }
+        }
+    }
+
+    // MARK: - NEW: Import Methods Implementation
+
+    /// Fetch recently played tracks for import functionality
+    func fetchRecentlyPlayed(after startTime: Date, before endTime: Date, completion: @escaping ([TrackData]) -> Void) {
+        Task {
+            do {
+                let tracks = try await fetchRecentlyPlayedFromAPI(after: startTime, before: endTime)
+                
+                // Handle empty sessions gracefully
+                if tracks.isEmpty {
+                    print("📭 No tracks found for session period")
+                }
+                
+                DispatchQueue.main.async {
+                    completion(tracks)
+                }
+            } catch {
+                print("❌ Failed to fetch recently played: \(error)")
+                DispatchQueue.main.async {
+                    completion([]) // Return empty array on error
+                }
+            }
+        }
+    }
+
+    /// Import tracks from time range
+    func importFromTimeRange(start: Date, end: Date) async throws -> [ImportedTrack] {
+        let tracks = try await fetchRecentlyPlayedFromAPI(after: start, before: end)
+        
+        return tracks.map { track in
+            ImportedTrack(
+                id: track.id,
+                name: track.title,
+                artist: track.artist,
+                album: track.album,
+                playedAt: track.playedAt,
+                spotifyId: track.id
+            )
+        }
+    }
+
+    /// Get playlist tracks
+    func getPlaylistTracks(playlistId: String) async throws -> [TrackData] {
+        return try await fetchPlaylistTracks(playlistId: playlistId)
+    }
+
+    /// Load user playlists
+    func loadUserPlaylists() async {
+        do {
+            let playlists = try await fetchUserPlaylists()
+            DispatchQueue.main.async {
+                self.userPlaylists = playlists
+            }
+        } catch {
+            print("❌ Failed to load playlists: \(error)")
         }
     }
 
@@ -321,7 +414,7 @@ class SpotifyManager: NSObject, ObservableObject {
         )
     }
 
-    // MARK: — Actual Spotify API Calls
+    // MARK: — Spotify API Implementation
 
     private func fetchCurrentlyPlaying() async throws -> SpotifyTrack? {
         return try await retryWithBackoff(
@@ -370,6 +463,168 @@ class SpotifyManager: NSObject, ObservableObject {
                 throw HTTPError(statusCode: http.statusCode)
             }
             return nil
+        }
+    }
+
+    // MARK: - Recently Played Implementation
+
+    private func fetchRecentlyPlayedFromAPI(after startTime: Date, before endTime: Date) async throws -> [TrackData] {
+        return try await retryWithBackoff(
+            operation: { try await self.performFetchRecentlyPlayed(after: startTime, before: endTime) },
+            operationId: "fetchRecentlyPlayed"
+        )
+    }
+    
+    private func performFetchRecentlyPlayed(after startTime: Date, before endTime: Date) async throws -> [TrackData] {
+        // Convert dates to Unix timestamps (milliseconds)
+        let afterTimestamp = Int(startTime.timeIntervalSince1970 * 1000)
+        let beforeTimestamp = Int(endTime.timeIntervalSince1970 * 1000)
+        
+        // Build URL with query parameters
+        var components = URLComponents(string: "https://api.spotify.com/v1/me/player/recently-played")!
+        components.queryItems = [
+            URLQueryItem(name: "after", value: String(afterTimestamp)),
+            URLQueryItem(name: "before", value: String(beforeTimestamp)),
+            URLQueryItem(name: "limit", value: "50") // Maximum allowed by Spotify
+        ]
+        
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        
+        // Create request with authorization
+        var request = URLRequest(url: url)
+        let tokenData = try KeychainHelper.read(service: service, account: "accessToken")
+        let accessToken = String(data: tokenData, encoding: .utf8)!
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        
+        // Make API call
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        switch httpResponse.statusCode {
+        case 200:
+            let recentlyPlayedResponse = try JSONDecoder().decode(RecentlyPlayedResponse.self, from: data)
+            return recentlyPlayedResponse.items.map { item in
+                TrackData(
+                    id: item.track.id,
+                    title: item.track.name,
+                    artist: item.track.artists.first?.name ?? "Unknown Artist",
+                    album: item.track.album.name,
+                    playedAt: ISO8601DateFormatter().date(from: item.played_at) ?? Date()
+                )
+            }
+        case 401:
+            // Token expired, refresh and retry
+            try await refreshIfNeeded()
+            return try await performFetchRecentlyPlayed(after: startTime, before: endTime)
+        case 429:
+            throw HTTPError(statusCode: 429)
+        default:
+            print("❌ Spotify recently played API error: \(httpResponse.statusCode)")
+            if httpResponse.statusCode >= 500 {
+                throw HTTPError(statusCode: httpResponse.statusCode)
+            }
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    // MARK: - Playlist Implementation
+
+    private func fetchUserPlaylists() async throws -> [SpotifyPlaylist] {
+        return try await retryWithBackoff(
+            operation: { try await self.performFetchUserPlaylists() },
+            operationId: "fetchUserPlaylists"
+        )
+    }
+
+    private func performFetchUserPlaylists() async throws -> [SpotifyPlaylist] {
+        let url = URL(string: "https://api.spotify.com/v1/me/playlists?limit=50")!
+        var request = URLRequest(url: url)
+        
+        let tokenData = try KeychainHelper.read(service: service, account: "accessToken")
+        let accessToken = String(data: tokenData, encoding: .utf8)!
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        switch httpResponse.statusCode {
+        case 200:
+            let playlistsResponse = try JSONDecoder().decode(PlaylistsResponse.self, from: data)
+            return playlistsResponse.items.map { item in
+                SpotifyPlaylist(
+                    id: item.id,
+                    name: item.name,
+                    description: item.description,
+                    trackCount: item.tracks.total
+                )
+            }
+        case 401:
+            try await refreshIfNeeded()
+            return try await performFetchUserPlaylists()
+        case 429:
+            throw HTTPError(statusCode: 429)
+        default:
+            print("❌ Spotify playlists API error: \(httpResponse.statusCode)")
+            if httpResponse.statusCode >= 500 {
+                throw HTTPError(statusCode: httpResponse.statusCode)
+            }
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    private func fetchPlaylistTracks(playlistId: String) async throws -> [TrackData] {
+        return try await retryWithBackoff(
+            operation: { try await self.performFetchPlaylistTracks(playlistId: playlistId) },
+            operationId: "fetchPlaylistTracks_\(playlistId)"
+        )
+    }
+
+    private func performFetchPlaylistTracks(playlistId: String) async throws -> [TrackData] {
+        let url = URL(string: "https://api.spotify.com/v1/playlists/\(playlistId)/tracks?limit=50")!
+        var request = URLRequest(url: url)
+        
+        let tokenData = try KeychainHelper.read(service: service, account: "accessToken")
+        let accessToken = String(data: tokenData, encoding: .utf8)!
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        switch httpResponse.statusCode {
+        case 200:
+            let playlistTracksResponse = try JSONDecoder().decode(PlaylistTracksResponse.self, from: data)
+            return playlistTracksResponse.items.compactMap { item in
+                guard let track = item.track else { return nil }
+                return TrackData(
+                    id: track.id,
+                    title: track.name,
+                    artist: track.artists.first?.name ?? "Unknown Artist",
+                    album: track.album.name,
+                    playedAt: ISO8601DateFormatter().date(from: item.added_at) ?? Date()
+                )
+            }
+        case 401:
+            try await refreshIfNeeded()
+            return try await performFetchPlaylistTracks(playlistId: playlistId)
+        case 429:
+            throw HTTPError(statusCode: 429)
+        default:
+            print("❌ Spotify playlist tracks API error: \(httpResponse.statusCode)")
+            if httpResponse.statusCode >= 500 {
+                throw HTTPError(statusCode: httpResponse.statusCode)
+            }
+            throw URLError(.badServerResponse)
         }
     }
 
@@ -442,160 +697,6 @@ class SpotifyManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Session Mode Support Methods
-    
-    /// Reconcile partial events for active mode sessions
-    @MainActor func reconcilePartialEvents(within startTime: Date, end endTime: Date, completion: @escaping ([ListeningEvent]) -> Void) {
-        // Get the partial events from DataStore
-        let partialEvents = DataStore.shared.currentSessionEvents
-        
-        // If no partial events, return empty array
-        guard !partialEvents.isEmpty else {
-            completion([])
-            return
-        }
-        
-        // Fetch recently played tracks to enrich the partial events
-        fetchRecentlyPlayed(after: startTime, before: endTime) { [weak self] recentTracks in
-            guard let self = self else {
-                completion([])
-                return
-            }
-            
-            // Match partial events with recently played tracks
-            let enrichedEvents = self.matchPartialEventsWithTracks(
-                partialEvents: partialEvents,
-                recentTracks: recentTracks
-            )
-            
-            completion(enrichedEvents)
-        }
-    }
-    
-    /// Fetch recently played tracks for passive/manual mode sessions
-    func fetchRecentlyPlayed(after startTime: Date, before endTime: Date, completion: @escaping ([TrackData]) -> Void) {
-        Task {
-            do {
-                let tracks = try await fetchRecentlyPlayedFromAPI(after: startTime, before: endTime)
-                
-                // Handle empty sessions gracefully
-                if tracks.isEmpty {
-                    print("📭 No tracks found for session period")
-                    // Still call completion with empty array - let UI handle the empty state
-                }
-                
-                DispatchQueue.main.async {
-                    completion(tracks)
-                }
-            } catch {
-                print("❌ Failed to fetch recently played: \(error)")
-                DispatchQueue.main.async {
-                    completion([]) // Return empty array on error
-                }
-            }
-        }
-    }
-    
-    // MARK: - Private Helper Methods
-    
-    private func fetchRecentlyPlayedFromAPI(after startTime: Date, before endTime: Date) async throws -> [TrackData] {
-        return try await retryWithBackoff(
-            operation: { try await self.performFetchRecentlyPlayed(after: startTime, before: endTime) },
-            operationId: "fetchRecentlyPlayed"
-        )
-    }
-    
-    private func performFetchRecentlyPlayed(after startTime: Date, before endTime: Date) async throws -> [TrackData] {
-        // Convert dates to Unix timestamps (milliseconds)
-        let afterTimestamp = Int(startTime.timeIntervalSince1970 * 1000)
-        let beforeTimestamp = Int(endTime.timeIntervalSince1970 * 1000)
-        
-        // Build URL with query parameters
-        var components = URLComponents(string: "https://api.spotify.com/v1/me/player/recently-played")!
-        components.queryItems = [
-            URLQueryItem(name: "after", value: String(afterTimestamp)),
-            URLQueryItem(name: "before", value: String(beforeTimestamp)),
-            URLQueryItem(name: "limit", value: "50") // Maximum allowed by Spotify
-        ]
-        
-        guard let url = components.url else {
-            throw URLError(.badURL)
-        }
-        
-        // Create request with authorization
-        var request = URLRequest(url: url)
-        let tokenData = try KeychainHelper.read(service: service, account: "accessToken")
-        let accessToken = String(data: tokenData, encoding: .utf8)!
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        
-        // Make API call
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        
-        switch httpResponse.statusCode {
-        case 200:
-            let recentlyPlayedResponse = try JSONDecoder().decode(RecentlyPlayedResponse.self, from: data)
-            return recentlyPlayedResponse.items.map { item in
-                TrackData(
-                    id: item.track.id,
-                    title: item.track.name,
-                    artist: item.track.artists.first?.name ?? "Unknown Artist",
-                    album: item.track.album.name,
-                    playedAt: ISO8601DateFormatter().date(from: item.played_at) ?? Date()
-                )
-            }
-        case 401:
-            // Token expired, refresh and retry
-            try await refreshIfNeeded()
-            return try await performFetchRecentlyPlayed(after: startTime, before: endTime)
-        case 429:
-            throw HTTPError(statusCode: 429)
-        default:
-            print("❌ Spotify recently played API error: \(httpResponse.statusCode)")
-            if httpResponse.statusCode >= 500 {
-                throw HTTPError(statusCode: httpResponse.statusCode)
-            }
-            throw URLError(.badServerResponse)
-        }
-    }
-    
-    private func matchPartialEventsWithTracks(partialEvents: [ListeningEvent], recentTracks: [TrackData]) -> [ListeningEvent] {
-        var enrichedEvents: [ListeningEvent] = []
-        
-        for partialEvent in partialEvents {
-            // Find the closest matching track by timestamp
-            let closestTrack = recentTracks.min { track1, track2 in
-                let diff1 = abs(track1.playedAt.timeIntervalSince(partialEvent.timestamp))
-                let diff2 = abs(track2.playedAt.timeIntervalSince(partialEvent.timestamp))
-                return diff1 < diff2
-            }
-            
-            if let track = closestTrack {
-                // Create enriched event with real Spotify data
-                let enrichedEvent = ListeningEvent(
-                    timestamp: partialEvent.timestamp,
-                    latitude: partialEvent.latitude,
-                    longitude: partialEvent.longitude,
-                    buildingName: partialEvent.buildingName,
-                    trackName: track.title,
-                    artistName: track.artist,
-                    albumName: track.album,
-                    genre: partialEvent.genre, // Keep original genre if available
-                    spotifyTrackId: track.id
-                )
-                enrichedEvents.append(enrichedEvent)
-            } else {
-                // Keep the partial event as-is if no match found
-                enrichedEvents.append(partialEvent)
-            }
-        }
-        
-        return enrichedEvents
-    }
-
     // MARK: - Batch Track Lookup (for Active Mode Reconciliation)
     
     func batchLookupTracks(trackIds: [String]) async throws -> [String: SpotifyTrack] {
@@ -668,7 +769,7 @@ class SpotifyManager: NSObject, ObservableObject {
     }
 }
 
-// MARK: - Supporting Types for Session Modes
+// MARK: - Supporting Types for Import
 
 struct TrackData {
     let id: String
@@ -676,6 +777,22 @@ struct TrackData {
     let artist: String
     let album: String
     let playedAt: Date
+}
+
+struct SpotifyPlaylist: Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let trackCount: Int
+}
+
+struct ImportedTrack: Identifiable {
+    let id: String
+    let name: String
+    let artist: String
+    let album: String
+    let playedAt: Date
+    let spotifyId: String
 }
 
 // MARK: — ASWebAuthentication Presentation

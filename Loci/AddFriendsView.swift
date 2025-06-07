@@ -269,7 +269,7 @@ struct UserSearchResultView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
                 
-                Text(user.email)
+                Text(user.email ?? "No email")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white.opacity(0.6))
                 

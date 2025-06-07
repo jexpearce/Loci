@@ -5,14 +5,20 @@ struct SpotifyImportView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var spotifyManager: SpotifyManager
     @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject var reverseGeocoding: ReverseGeocoding
     
     @State private var selectedImportMode: SpotifyImportMode = .recentTracks
     @State private var selectedLocation: String?
+    @State private var selectedLocationInfo: SelectedLocationInfo?
     @State private var showingLocationPicker = false
     @State private var isImporting = false
     @State private var importProgress: Double = 0.0
     @State private var importedTracks: [ImportedTrack] = []
     @State private var showingPreview = false
+    @State private var selectedPlaylist: SpotifyPlaylist?
+    @State private var showingPlaylistPicker = false
+    @State private var importError: String?
     
     // Time Range Selection
     @State private var selectedStartDate = Calendar.current.date(byAdding: .hour, value: -6, to: Date()) ?? Date()
@@ -29,36 +35,58 @@ struct SpotifyImportView: View {
                         // Header
                         ImportHeaderView()
                         
-                        // Import Mode Selection
-                        ImportModeSelectionCard(selectedMode: $selectedImportMode)
-                        
-                        // Location Assignment
-                        LocationAssignmentCard(
-                            selectedLocation: $selectedLocation,
-                            showingLocationPicker: $showingLocationPicker
-                        )
-                        
-                        // Mode-specific Configuration
-                        if selectedImportMode == .timeRange {
-                            TimeRangeSelectionCard(
-                                startDate: $selectedStartDate,
-                                endDate: $selectedEndDate
+                        // Authentication Check
+                        if !spotifyManager.isAuthenticated {
+                            SpotifyAuthPrompt()
+                        } else {
+                            // Import Mode Selection
+                            ImportModeSelectionCard(selectedMode: $selectedImportMode)
+                            
+                            // Location Assignment
+                            LocationAssignmentCard(
+                                selectedLocation: $selectedLocation,
+                                showingLocationPicker: $showingLocationPicker
                             )
-                        }
-                        
-                        // Import Button
-                        ImportButton(
-                            canImport: canStartImport,
-                            isImporting: isImporting,
-                            progress: importProgress
-                        ) {
-                            startImport()
-                        }
-                        
-                        // Preview Section
-                        if !importedTracks.isEmpty {
-                            ImportPreviewSection(tracks: importedTracks) {
-                                saveImportedTracks()
+                            
+                            // Mode-specific Configuration
+                            Group {
+                                switch selectedImportMode {
+                                case .timeRange:
+                                    TimeRangeSelectionCard(
+                                        startDate: $selectedStartDate,
+                                        endDate: $selectedEndDate
+                                    )
+                                case .playlist:
+                                    PlaylistSelectionCard(
+                                        selectedPlaylist: $selectedPlaylist,
+                                        showingPlaylistPicker: $showingPlaylistPicker
+                                    )
+                                case .recentTracks:
+                                    RecentTracksInfoCard()
+                                }
+                            }
+                            
+                            // Error Display
+                            if let error = importError {
+                                ImportErrorCard(error: error) {
+                                    importError = nil
+                                }
+                            }
+                            
+                            // Import Button
+                            ImportButton(
+                                canImport: canStartImport,
+                                isImporting: isImporting,
+                                progress: importProgress
+                            ) {
+                                startImport()
+                            }
+                            
+                            // Preview Section
+                            if !importedTracks.isEmpty {
+                                ImportPreviewSection(tracks: importedTracks) {
+                                    saveImportedTracks()
+                                }
                             }
                         }
                     }
@@ -78,14 +106,39 @@ struct SpotifyImportView: View {
             }
         }
         .sheet(isPresented: $showingLocationPicker) {
-            LocationSelectionView(selectedLocation: $selectedLocation)
+            LocationSelectionView(
+                selectedLocation: $selectedLocation,
+                selectedLocationInfo: $selectedLocationInfo
+            )
+        }
+        .sheet(isPresented: $showingPlaylistPicker) {
+            PlaylistPickerView(
+                selectedPlaylist: $selectedPlaylist,
+                playlists: spotifyManager.userPlaylists
+            )
+        }
+        .onAppear {
+            if spotifyManager.isAuthenticated && spotifyManager.userPlaylists.isEmpty {
+                Task {
+                    await spotifyManager.loadUserPlaylists()
+                }
+            }
         }
     }
     
     private var canStartImport: Bool {
-        spotifyManager.isAuthenticated &&
-        selectedLocation != nil &&
-        !isImporting
+        guard spotifyManager.isAuthenticated && selectedLocation != nil && !isImporting else {
+            return false
+        }
+        
+        switch selectedImportMode {
+        case .recentTracks:
+            return true
+        case .timeRange:
+            return selectedStartDate < selectedEndDate
+        case .playlist:
+            return selectedPlaylist != nil
+        }
     }
     
     private func startImport() {
@@ -94,6 +147,7 @@ struct SpotifyImportView: View {
         isImporting = true
         importProgress = 0.0
         importedTracks = []
+        importError = nil
         
         Task {
             await performImport()
@@ -101,59 +155,86 @@ struct SpotifyImportView: View {
     }
     
     private func performImport() async {
-        switch selectedImportMode {
-        case .recentTracks:
-            await importRecentTracks()
-        case .timeRange:
-            await importTimeRange()
-        case .playlist:
-            await importPlaylist()
-        }
-        
-        await MainActor.run {
-            isImporting = false
-            importProgress = 1.0
+        do {
+            await MainActor.run {
+                importProgress = 0.1
+            }
+            
+            let tracks: [ImportedTrack]
+            
+            switch selectedImportMode {
+            case .recentTracks:
+                tracks = try await importRecentTracks()
+            case .timeRange:
+                tracks = try await importTimeRange()
+            case .playlist:
+                tracks = try await importPlaylist()
+            }
+            
+            await MainActor.run {
+                self.importedTracks = tracks
+                self.importProgress = 1.0
+                self.isImporting = false
+                
+                if tracks.isEmpty {
+                    self.importError = "No tracks found for the selected period. Try a different time range or check that you were listening to music during this time."
+                }
+            }
+            
+        } catch {
+            await MainActor.run {
+                self.isImporting = false
+                self.importProgress = 0.0
+                self.importError = "Import failed: \(error.localizedDescription)"
+                print("❌ Import error: \(error)")
+            }
         }
     }
     
-    private func importRecentTracks() async {
-        // Import last 50 tracks from Spotify
+    private func importRecentTracks() async throws -> [ImportedTrack] {
+        // Import last 6 hours of tracks
         let endTime = Date()
         let startTime = Calendar.current.date(byAdding: .hour, value: -6, to: endTime) ?? endTime
         
-        await importTracksForTimeRange(start: startTime, end: endTime)
+        await MainActor.run {
+            importProgress = 0.3
+        }
+        
+        return try await spotifyManager.importFromTimeRange(start: startTime, end: endTime)
     }
     
-    private func importTimeRange() async {
-        await importTracksForTimeRange(start: selectedStartDate, end: selectedEndDate)
+    private func importTimeRange() async throws -> [ImportedTrack] {
+        await MainActor.run {
+            importProgress = 0.3
+        }
+        
+        return try await spotifyManager.importFromTimeRange(start: selectedStartDate, end: selectedEndDate)
     }
     
-    private func importPlaylist() async {
-        // TODO: Implement playlist import
-        print("Playlist import not yet implemented")
-    }
-    
-    private func importTracksForTimeRange(start: Date, end: Date) async {
-        await withCheckedContinuation { continuation in
-            spotifyManager.fetchRecentlyPlayed(after: start, before: end) { tracks in
-                let imported = tracks.map { track in
-                    ImportedTrack(
-                        id: track.id,
-                        name: track.title,
-                        artist: track.artist,
-                        album: track.album,
-                        playedAt: track.playedAt,
-                        spotifyId: track.id
-                    )
-                }
-                
-                DispatchQueue.main.async {
-                    self.importedTracks = imported
-                    self.importProgress = 1.0
-                }
-                
-                continuation.resume()
-            }
+    private func importPlaylist() async throws -> [ImportedTrack] {
+        guard let playlist = selectedPlaylist else {
+            throw ImportError.noPlaylistSelected
+        }
+        
+        await MainActor.run {
+            importProgress = 0.3
+        }
+        
+        let trackData = try await spotifyManager.getPlaylistTracks(playlistId: playlist.id)
+        
+        await MainActor.run {
+            importProgress = 0.8
+        }
+        
+        return trackData.map { track in
+            ImportedTrack(
+                id: track.id,
+                name: track.title,
+                artist: track.artist,
+                album: track.album,
+                playedAt: track.playedAt,
+                spotifyId: track.id
+            )
         }
     }
     
@@ -163,8 +244,8 @@ struct SpotifyImportView: View {
         let events = importedTracks.map { track in
             ListeningEvent(
                 timestamp: track.playedAt,
-                latitude: 0.0, // No specific coordinates for imports
-                longitude: 0.0,
+                latitude: selectedLocationInfo?.coordinate.latitude ?? 0.0,
+                longitude: selectedLocationInfo?.coordinate.longitude ?? 0.0,
                 buildingName: location,
                 trackName: track.name,
                 artistName: track.artist,
@@ -179,7 +260,7 @@ struct SpotifyImportView: View {
         let session = Session(
             startTime: importedTracks.first?.playedAt ?? Date(),
             endTime: importedTracks.last?.playedAt ?? Date(),
-            duration: .oneHour, // Approximate
+            duration: .oneHour, // Approximate based on time span
             mode: .unknown, // Mark as imported
             events: events
         )
@@ -189,6 +270,9 @@ struct SpotifyImportView: View {
         
         // Update session history
         dataStore.sessionHistory.insert(session, at: 0)
+        
+        // Show success notification
+        NotificationManager.shared.notifyImportCompleted(trackCount: importedTracks.count)
         
         dismiss()
     }
@@ -215,6 +299,38 @@ struct ImportHeaderView: View {
                     .multilineTextAlignment(.center)
             }
         }
+    }
+}
+
+// MARK: - Spotify Auth Prompt
+
+struct SpotifyAuthPrompt: View {
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            Image(systemName: "music.note.tv")
+                .font(.system(size: 32))
+                .foregroundColor(LociTheme.Colors.primaryAction)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Connect Spotify")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("You need to connect your Spotify account to import your listening history")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button("Connect Spotify") {
+                spotifyManager.startAuthorization()
+            }
+            .lociButton(.primary, isFullWidth: true)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
     }
 }
 
@@ -310,6 +426,10 @@ struct LocationAssignmentCard: View {
     @Binding var selectedLocation: String?
     @Binding var showingLocationPicker: Bool
     @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject var reverseGeocoding: ReverseGeocoding
+    
+    @State private var isLoadingCurrentLocation = false
+    @State private var locationError: String?
     
     var body: some View {
         VStack(spacing: LociTheme.Spacing.medium) {
@@ -330,7 +450,67 @@ struct LocationAssignmentCard: View {
                     selectedLocation = nil
                 }
             } else {
-                LocationSelectionButtons(showingLocationPicker: $showingLocationPicker)
+                VStack(spacing: LociTheme.Spacing.small) {
+                    Button(action: getCurrentLocation) {
+                        HStack {
+                            if isLoadingCurrentLocation {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.mainText))
+                                    .scaleEffect(0.8)
+                                Text("Getting location...")
+                            } else {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 18))
+                                Text("Use Current Location")
+                            }
+                            
+                            Spacer()
+                            
+                            if !isLoadingCurrentLocation {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(LociTheme.Colors.subheadText)
+                            }
+                        }
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .padding(LociTheme.Spacing.medium)
+                        .background(LociTheme.Colors.disabledState.opacity(0.3))
+                        .cornerRadius(LociTheme.CornerRadius.small)
+                    }
+                    .disabled(isLoadingCurrentLocation)
+                    
+                    Button(action: { showingLocationPicker = true }) {
+                        HStack {
+                            Image(systemName: "map")
+                                .font(.system(size: 18))
+                            Text("Select on Map")
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(LociTheme.Colors.subheadText)
+                        }
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .padding(LociTheme.Spacing.medium)
+                        .background(LociTheme.Colors.disabledState.opacity(0.3))
+                        .cornerRadius(LociTheme.CornerRadius.small)
+                    }
+                    
+                    if let error = locationError {
+                        HStack(spacing: LociTheme.Spacing.small) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 14))
+                                .foregroundColor(LociTheme.Colors.primaryAction)
+                            
+                            Text(error)
+                                .font(LociTheme.Typography.caption)
+                                .foregroundColor(LociTheme.Colors.primaryAction)
+                            
+                            Spacer()
+                        }
+                    }
+                }
             }
             
             // Info
@@ -352,6 +532,39 @@ struct LocationAssignmentCard: View {
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+    
+    private func getCurrentLocation() {
+        guard locationManager.authorizationStatus == .authorizedAlways ||
+              locationManager.authorizationStatus == .authorizedWhenInUse else {
+            locationError = "Location permission required"
+            locationManager.requestPermissions()
+            return
+        }
+        
+        isLoadingCurrentLocation = true
+        locationError = nil
+        
+        locationManager.requestOneTimeLocation { location in
+            guard let location = location else {
+                self.locationError = "Could not get current location"
+                self.isLoadingCurrentLocation = false
+                return
+            }
+            
+            Task {
+                let buildingName = await self.reverseGeocoding.reverseGeocodeAsync(location: location)?.name
+                
+                DispatchQueue.main.async {
+                    if let buildingName = buildingName {
+                        self.selectedLocation = buildingName
+                    } else {
+                        self.locationError = "Could not determine building name"
+                    }
+                    self.isLoadingCurrentLocation = false
+                }
+            }
+        }
     }
 }
 
@@ -404,6 +617,20 @@ struct TimeRangeSelectionCard: View {
                 
                 Spacer()
             }
+            
+            // Info about Spotify limits
+            HStack(spacing: LociTheme.Spacing.small) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Text("Spotify provides recently played tracks from the last 50 plays. For older data, try playlist import.")
+                    .font(.system(size: 11))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.leading)
+                
+                Spacer()
+            }
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
@@ -419,6 +646,150 @@ struct TimeRangeSelectionCard: View {
         } else {
             return "\(minutes)m"
         }
+    }
+}
+
+// MARK: - Playlist Selection Card
+
+struct PlaylistSelectionCard: View {
+    @Binding var selectedPlaylist: SpotifyPlaylist?
+    @Binding var showingPlaylistPicker: Bool
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.notificationBadge)
+                
+                Text("Select Playlist")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+            }
+            
+            if let playlist = selectedPlaylist {
+                SelectedPlaylistDisplay(playlist: playlist) {
+                    selectedPlaylist = nil
+                }
+            } else {
+                Button("Choose Playlist") {
+                    showingPlaylistPicker = true
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(LociTheme.Colors.disabledState.opacity(0.3))
+                .cornerRadius(LociTheme.CornerRadius.small)
+                
+                if spotifyManager.userPlaylists.isEmpty {
+                    Text("Loading playlists...")
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+            
+            // Info
+            HStack(spacing: LociTheme.Spacing.small) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.notificationBadge)
+                
+                Text("Import all tracks from a playlist. Tracks will be timestamped with when they were added to the playlist.")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.leading)
+                
+                Spacer()
+            }
+            .padding(LociTheme.Spacing.small)
+            .background(LociTheme.Colors.notificationBadge.opacity(0.1))
+            .cornerRadius(LociTheme.CornerRadius.small)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+// MARK: - Recent Tracks Info Card
+
+struct RecentTracksInfoCard: View {
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                Text("Recent Tracks")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.small) {
+                Text("This will import your recently played tracks from the last 6 hours.")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("• Quick and easy import")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Text("• Perfect for capturing a recent listening session")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Text("• Uses Spotify's recently played data")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+// MARK: - Import Error Card
+
+struct ImportErrorCard: View {
+    let error: String
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                
+                Text("Import Error")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+            
+            Text(error)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.subheadText)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.primaryAction.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                .stroke(LociTheme.Colors.primaryAction.opacity(0.3), lineWidth: 1)
+        )
     }
 }
 
@@ -501,26 +872,44 @@ struct ImportPreviewSection: View {
                     .foregroundColor(LociTheme.Colors.secondaryHighlight)
             }
             
-            LazyVStack(spacing: LociTheme.Spacing.small) {
-                ForEach(tracks.prefix(10)) { track in
-                    ImportedTrackRow(track: track)
+            if tracks.isEmpty {
+                VStack(spacing: LociTheme.Spacing.small) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 24))
+                        .foregroundColor(LociTheme.Colors.subheadText.opacity(0.5))
+                    
+                    Text("No tracks found")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                    
+                    Text("Try a different time range or check that you were listening to music during this period")
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.vertical, LociTheme.Spacing.large)
+            } else {
+                LazyVStack(spacing: LociTheme.Spacing.small) {
+                    ForEach(tracks.prefix(10)) { track in
+                        ImportedTrackRow(track: track)
+                    }
+                    
+                    if tracks.count > 10 {
+                        Text("+ \(tracks.count - 10) more tracks")
+                            .font(LociTheme.Typography.caption)
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .padding()
+                    }
                 }
                 
-                if tracks.count > 10 {
-                    Text("+ \(tracks.count - 10) more tracks")
-                        .font(LociTheme.Typography.caption)
-                        .foregroundColor(LociTheme.Colors.subheadText)
-                        .padding()
+                Button(action: onSave) {
+                    HStack {
+                        Image(systemName: "checkmark.circle")
+                        Text("Save \(tracks.count) Tracks")
+                    }
                 }
+                .lociButton(.primary, isFullWidth: true)
             }
-            
-            Button(action: onSave) {
-                HStack {
-                    Image(systemName: "checkmark.circle")
-                    Text("Save \(tracks.count) Tracks")
-                }
-            }
-            .lociButton(.primary, isFullWidth: true)
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard()
@@ -556,112 +945,206 @@ struct ImportedTrackRow: View {
     }
 }
 
-// MARK: - Supporting Types
-
-struct ImportedTrack: Identifiable {
-    let id: String
-    let name: String
-    let artist: String
-    let album: String
-    let playedAt: Date
-    let spotifyId: String
-}
-
-// MARK: - Location Selection View (Placeholder)
+// MARK: - Location Selection View (Enhanced)
 
 struct LocationSelectionView: View {
     @Binding var selectedLocation: String?
+    @Binding var selectedLocationInfo: SelectedLocationInfo?
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var reverseGeocoding: ReverseGeocoding
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var mapRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+    )
+    @State private var isReverseGeocoding = false
+    @State private var searchText = ""
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // Map
+                Map(coordinateRegion: $mapRegion)
+                    .ignoresSafeArea(edges: .bottom)
+                
+                // Center crosshair
+                Image(systemName: "plus")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                // Selection UI
+                VStack {
+                    Spacer()
+                    
+                    VStack(spacing: LociTheme.Spacing.medium) {
+                        if isReverseGeocoding {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                Text("Finding building...")
+                                    .font(LociTheme.Typography.body)
+                                    .foregroundColor(.white)
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(LociTheme.CornerRadius.medium)
+                        }
+                        
+                        HStack(spacing: LociTheme.Spacing.small) {
+                            Button("Cancel") {
+                                dismiss()
+                            }
+                            .lociButton(.secondary)
+                            
+                            Button("Select This Location") {
+                                selectCurrentLocation()
+                            }
+                            .lociButton(.primary)
+                            .disabled(isReverseGeocoding)
+                        }
+                        .padding()
+                    }
+                }
+            }
+            .navigationTitle("Select Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Center on user's current location if available
+                if let currentLocation = locationManager.currentLocation {
+                    mapRegion.center = currentLocation.coordinate
+                }
+            }
+        }
+    }
+    
+    private func selectCurrentLocation() {
+        isReverseGeocoding = true
+        let coordinate = mapRegion.center
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        
+        Task {
+            let buildingInfo = await reverseGeocoding.reverseGeocodeAsync(location: location)
+            
+            DispatchQueue.main.async {
+                if let buildingInfo = buildingInfo {
+                    self.selectedLocation = buildingInfo.name
+                    self.selectedLocationInfo = SelectedLocationInfo(
+                        coordinate: coordinate,
+                        buildingName: buildingInfo.name
+                    )
+                } else {
+                    // Fallback to coordinate-based location
+                    let fallbackName = "Location \(String(format: "%.4f, %.4f", coordinate.latitude, coordinate.longitude))"
+                    self.selectedLocation = fallbackName
+                    self.selectedLocationInfo = SelectedLocationInfo(
+                        coordinate: coordinate,
+                        buildingName: fallbackName
+                    )
+                }
+                
+                self.isReverseGeocoding = false
+                dismiss()
+            }
+        }
+    }
+}
+
+// MARK: - Playlist Picker View
+
+struct PlaylistPickerView: View {
+    @Binding var selectedPlaylist: SpotifyPlaylist?
+    let playlists: [SpotifyPlaylist]
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Location Selection")
-                    .font(LociTheme.Typography.heading)
-                    .foregroundColor(LociTheme.Colors.mainText)
+            ZStack {
+                LociTheme.Colors.appBackground
+                    .ignoresSafeArea()
                 
-                Text("This would be a location picker interface")
-                    .font(LociTheme.Typography.body)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-                
-                Button("Select Test Location") {
-                    selectedLocation = "Test Coffee Shop"
-                    dismiss()
+                if playlists.isEmpty {
+                    VStack(spacing: LociTheme.Spacing.medium) {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 48))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        
+                        Text("No playlists found")
+                            .font(LociTheme.Typography.subheading)
+                            .foregroundColor(LociTheme.Colors.mainText)
+                        
+                        Text("Create some playlists in Spotify to import them here")
+                            .font(LociTheme.Typography.body)
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .multilineTextAlignment(.center)
+                    }
+                } else {
+                    List(playlists) { playlist in
+                        PlaylistRow(playlist: playlist, isSelected: selectedPlaylist?.id == playlist.id) {
+                            selectedPlaylist = playlist
+                            dismiss()
+                        }
+                        .listRowBackground(LociTheme.Colors.contentContainer)
+                    }
+                    .listStyle(PlainListStyle())
+                    .background(LociTheme.Colors.appBackground)
                 }
-                .lociButton(.primary)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(LociTheme.Colors.appBackground)
-            .navigationTitle("Select Location")
+            .navigationTitle("Select Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
                 }
             }
         }
     }
 }
-// MARK: - Reused Components (from OnePlaceSessionView)
 
-struct SelectedLocationDisplay: View {
-    let location: SelectedLocation
-    let onRemove: () -> Void
+struct PlaylistRow: View {
+    let playlist: SpotifyPlaylist
+    let isSelected: Bool
+    let action: () -> Void
     
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
-                Text(location.buildingInfo.name)
-                    .font(LociTheme.Typography.body)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                
-                if let address = location.buildingInfo.address {
-                    Text(address)
-                        .font(LociTheme.Typography.caption)
-                        .foregroundColor(LociTheme.Colors.subheadText)
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                    Text(playlist.name)
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.mainText)
                         .lineLimit(1)
+                    
+                    if let description = playlist.description, !description.isEmpty {
+                        Text(description)
+                            .font(LociTheme.Typography.caption)
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .lineLimit(2)
+                    }
+                    
+                    Text("\(playlist.trackCount) tracks")
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                }
+                
+                Spacer()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
                 }
             }
-            
-            Spacer()
-            
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(LociTheme.Colors.disabledState)
-            }
+            .padding(.vertical, LociTheme.Spacing.small)
         }
-        .padding(LociTheme.Spacing.medium)
-        .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
-        .cornerRadius(LociTheme.CornerRadius.small)
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
-struct LocationSelectionButtons: View {
-    @Binding var showingLocationPicker: Bool
-    
-    var body: some View {
-        VStack(spacing: LociTheme.Spacing.small) {
-            Button("Use Current Location") {
-                // This would be handled by parent view
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(LociTheme.Colors.disabledState.opacity(0.3))
-            .cornerRadius(LociTheme.CornerRadius.small)
-            
-            Button(action: { showingLocationPicker = true }) {
-                Text("Select on Map")
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(LociTheme.Colors.disabledState.opacity(0.3))
-            .cornerRadius(LociTheme.CornerRadius.small)
-        }
-    }
-}
+// MARK: - Supporting Components
 
 struct SimpleSelectedLocationDisplay: View {
     let locationName: String
@@ -690,5 +1173,78 @@ struct SimpleSelectedLocationDisplay: View {
         .padding(LociTheme.Spacing.medium)
         .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
         .cornerRadius(LociTheme.CornerRadius.small)
+    }
+}
+
+struct SelectedPlaylistDisplay: View {
+    let playlist: SpotifyPlaylist
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
+                Text(playlist.name)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("\(playlist.trackCount) tracks")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+            
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(LociTheme.Colors.disabledState)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.notificationBadge.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.small)
+    }
+}
+
+// MARK: - Supporting Types
+
+struct SelectedLocationInfo {
+    let coordinate: CLLocationCoordinate2D
+    let buildingName: String
+}
+
+enum ImportError: Error, LocalizedError {
+    case noPlaylistSelected
+    case spotifyNotConnected
+    case noLocationSelected
+    
+    var errorDescription: String? {
+        switch self {
+        case .noPlaylistSelected:
+            return "No playlist selected"
+        case .spotifyNotConnected:
+            return "Spotify not connected"
+        case .noLocationSelected:
+            return "No location selected"
+        }
+    }
+}
+
+// MARK: - NotificationManager Extension
+
+extension NotificationManager {
+    func notifyImportCompleted(trackCount: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "Import Complete! 🎵"
+        content.body = "Successfully imported \(trackCount) tracks from Spotify"
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: "import.completed.\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        
+        notificationCenter.add(request)
     }
 }

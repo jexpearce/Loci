@@ -427,7 +427,7 @@ struct MatchResult: Codable {
     let isNew: Bool
 }
 
-struct UserProfile: Codable {
+struct UserProfile: Codable, Identifiable {
     let id: String
     let displayName: String
     let email: String?
@@ -439,6 +439,7 @@ struct UserProfile: Codable {
     let topGenres: [String]
     let sessionModePreference: String?
     let privacyLevel: String
+    let profileImageURL: String?
 }
 
 // MARK: - API Request Models (Updated for new session modes)
