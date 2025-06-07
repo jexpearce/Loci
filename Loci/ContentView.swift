@@ -5,9 +5,13 @@ struct ContentView: View {
     @EnvironmentObject var dataStore: DataStore
     @EnvironmentObject var spotifyManager: SpotifyManager
     @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject var firebaseManager: FirebaseManager
     
     @State private var showingSessionHistory = false
     @State private var showingSettings = false
+    @State private var showingSpotifyImport = false
+    @State private var showingLocationChangeAlert = false
+    @State private var detectedBuildingChange: BuildingChange?
     
     var body: some View {
         ZStack {
@@ -17,30 +21,36 @@ struct ContentView: View {
             
             // Content
             VStack(spacing: 0) {
-                // Header
-                HeaderView(showingSettings: $showingSettings)
-                    .padding(.horizontal, LociTheme.Spacing.medium)
-                    .padding(.top, LociTheme.Spacing.large)
-                    .padding(.bottom, LociTheme.Spacing.medium)
+                // Header (Updated with import button)
+                HeaderView(
+                    showingSettings: $showingSettings,
+                    showingSpotifyImport: $showingSpotifyImport,
+                    showingSessionHistory: $showingSessionHistory
+                )
+                .padding(.horizontal, LociTheme.Spacing.medium)
+                .padding(.top, LociTheme.Spacing.large)
+                .padding(.bottom, LociTheme.Spacing.medium)
                 
                 // Main Content
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: LociTheme.Spacing.large) {
                         if sessionManager.isSessionActive {
+                            // Show active session (mode-specific)
                             ActiveSessionView()
                         } else {
-                            SessionModeSelectionView()
+                            // Show NEW simplified mode selection
+                            NewSessionModeSelectionView()
                         }
                         
-                        // Status Section
+                        // Status Section (keep existing)
                         StatusSection()
                         
-                        // Recent Sessions
+                        // Recent Sessions (keep existing)
                         if !dataStore.sessionHistory.isEmpty {
                             RecentSessionsSection(showingSessionHistory: $showingSessionHistory)
                         }
                         
-                        // Social Activity
+                        // Social Activity (keep existing)
                         SocialActivitySection()
                     }
                     .padding(.horizontal, LociTheme.Spacing.medium)
@@ -53,68 +63,88 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+                .environmentObject(spotifyManager)
+                .environmentObject(dataStore)
+                .environmentObject(firebaseManager)
         }
-    }
-}
-
-// MARK: - Header View
-
-struct HeaderView: View {
-    @Binding var showingSettings: Bool
-    
-    var body: some View {
-        HStack {
-            Text("Loci")
-                .font(LociTheme.Typography.heading)
-                .foregroundColor(LociTheme.Colors.mainText)
-                .neonText()
-            
-            Spacer()
-            
-            Button(action: { showingSettings = true }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 22, weight: .regular))
-                    .foregroundColor(LociTheme.Colors.mainText)
-                    .padding(LociTheme.Spacing.xSmall)
+        .sheet(isPresented: $showingSpotifyImport) {
+            SpotifyImportView()
+                .environmentObject(spotifyManager)
+        }
+        .alert("Location Changed", isPresented: $showingLocationChangeAlert) {
+            Button("Got it") {
+                showingLocationChangeAlert = false
+            }
+        } message: {
+            if let change = detectedBuildingChange {
+                Text("You've moved to \(change.toBuildingName). Your music will now be tracked here.")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .buildingChangeDetected)) { notification in
+            if let change = notification.object as? BuildingChange {
+                detectedBuildingChange = change
+                showingLocationChangeAlert = true
             }
         }
     }
 }
-
-// MARK: - Active Session View
-
-struct ActiveSessionView: View {
+// MARK: - Header View
+struct HeaderView: View {
+    @Binding var showingSettings: Bool
+    @Binding var showingSpotifyImport: Bool
+    @Binding var showingSessionHistory: Bool
     @EnvironmentObject var sessionManager: SessionManager
-    @EnvironmentObject var dataStore: DataStore
-    @EnvironmentObject var locationManager: LocationManager
-    @State private var showingSessionDetails = false
     
     var body: some View {
-        VStack(spacing: LociTheme.Spacing.large) {
-            // Live Session Dashboard
-            LiveSessionDashboard()
+        HStack {
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text("Loci")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .neonText()
+                
+                // Show session status if active
+                if sessionManager.isSessionActive {
+                    Text("\(sessionManager.sessionMode.displayName) Session")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(sessionManager.sessionMode == .onePlace ?
+                                       LociTheme.Colors.secondaryHighlight :
+                                       LociTheme.Colors.primaryAction)
+                }
+            }
             
-            // Session Progress
-            SessionProgressView()
+            Spacer()
             
-            // Current Activity
-            CurrentActivityCard()
-            
-            // Quick Actions
-            SessionQuickActions(showingDetails: $showingSessionDetails)
-        }
-        .padding(.vertical, LociTheme.Spacing.medium)
-        .sheet(isPresented: $showingSessionDetails) {
-            LiveSessionDetailsView()
+            HStack(spacing: LociTheme.Spacing.small) {
+                // NEW: Spotify Import Button
+                Button(action: { showingSpotifyImport = true }) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                        .padding(LociTheme.Spacing.xSmall)
+                }
+                
+                // History Button
+                Button(action: { showingSessionHistory = true }) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .padding(LociTheme.Spacing.xSmall)
+                }
+                
+                // Settings Button (keep existing)
+                Button(action: { showingSettings = true }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .padding(LociTheme.Spacing.xSmall)
+                }
+            }
         }
     }
 }
-
-// MARK: - Live Session Dashboard
-
-struct LiveSessionDashboard: View {
+struct OnTheMoveActiveDashboard: View {
     @EnvironmentObject var sessionManager: SessionManager
-    @EnvironmentObject var dataStore: DataStore
     @State private var timeElapsed = ""
     @State private var timeRemaining = ""
     
@@ -124,7 +154,7 @@ struct LiveSessionDashboard: View {
         VStack(spacing: LociTheme.Spacing.medium) {
             // Mode Badge
             HStack {
-                SessionModeBadge(mode: sessionManager.sessionMode)
+                SessionModeBadge(mode: .onTheMove)
                 Spacer()
                 LiveIndicatorDot()
             }
@@ -136,26 +166,19 @@ struct LiveSessionDashboard: View {
                     .foregroundColor(LociTheme.Colors.mainText)
                     .monospacedDigit()
                 
-                if let endTime = sessionManager.sessionEndTime {
-                    Text("Auto-stops in \(timeRemaining)")
+                if !timeRemaining.isEmpty {
+                    Text("Stops in \(timeRemaining)")
                         .font(LociTheme.Typography.caption)
                         .foregroundColor(LociTheme.Colors.subheadText)
                         .monospacedDigit()
                 }
             }
             
-            // Session Stats Grid
-            SessionStatsGrid()
+            // Session Stats
+            OnTheMoveStatsGrid()
         }
         .padding(LociTheme.Spacing.medium)
-        .background(
-            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.large)
-                .fill(LociTheme.Colors.contentContainer)
-                .overlay(
-                    RoundedRectangle(cornerRadius: LociTheme.CornerRadius.large)
-                        .stroke(modeColor.opacity(0.3), lineWidth: 1)
-                )
-        )
+        .lociCard()
         .onReceive(timer) { _ in
             updateTimers()
         }
@@ -164,39 +187,130 @@ struct LiveSessionDashboard: View {
         }
     }
     
-    private var modeColor: Color {
-        switch sessionManager.sessionMode {
-        case .manual: return LociTheme.Colors.primaryAction
-        case .passive: return LociTheme.Colors.secondaryHighlight
-        case .active: return LociTheme.Colors.notificationBadge
-        case .unknown: return LociTheme.Colors.subheadText
+    private func updateTimers() {
+        if let elapsed = sessionManager.getSessionElapsed() {
+            let hours = Int(elapsed) / 3600
+            let minutes = (Int(elapsed) % 3600) / 60
+            let seconds = Int(elapsed) % 60
+            timeElapsed = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        }
+        
+        if let remaining = sessionManager.getSessionTimeRemaining() {
+            let hours = Int(remaining) / 3600
+            let minutes = (Int(remaining) % 3600) / 60
+            timeRemaining = String(format: "%02d:%02d", hours, minutes)
+        } else {
+            timeRemaining = ""
         }
     }
+}
+struct OnePlaceActiveDashboard: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var dataStore: DataStore
     
-    private func updateTimers() {
-        guard let startTime = sessionManager.sessionStartTime else { return }
-        
-        let elapsed = Date().timeIntervalSince(startTime)
-        let hours = Int(elapsed) / 3600
-        let minutes = (Int(elapsed) % 3600) / 60
-        let seconds = Int(elapsed) % 60
-        timeElapsed = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        
-        if let endTime = sessionManager.sessionEndTime {
-            let remaining = endTime.timeIntervalSince(Date())
-            if remaining > 0 {
-                let remainingHours = Int(remaining) / 3600
-                let remainingMinutes = (Int(remaining) % 3600) / 60
-                timeRemaining = String(format: "%02d:%02d", remainingHours, remainingMinutes)
-            } else {
-                timeRemaining = "00:00"
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Mode Badge
+            HStack {
+                SessionModeBadge(mode: .onePlace)
+                Spacer()
+                LiveIndicatorDot()
             }
+            
+            // Current Building
+            VStack(spacing: LociTheme.Spacing.small) {
+                if let building = sessionManager.currentBuilding {
+                    Text(building)
+                        .font(LociTheme.Typography.timer)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                } else {
+                    Text("Getting location...")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                if sessionManager.hasDetectedLocationChange {
+                    HStack(spacing: LociTheme.Spacing.xSmall) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                        
+                        Text("Location updated")
+                            .font(LociTheme.Typography.caption)
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    }
+                }
+            }
+            
+            // Session Stats
+            OnePlaceStatsGrid()
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
+
+// MARK: - Active Session View
+struct ActiveSessionView: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var dataStore: DataStore
+    @State private var showingSessionDetails = false
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Mode-specific dashboard
+            Group {
+                switch sessionManager.sessionMode {
+                case .onePlace:
+                    OnePlaceActiveDashboard()
+                case .onTheMove:
+                    OnTheMoveActiveDashboard()
+                case .unknown:
+                    UnknownSessionDashboard()
+                }
+            }
+            .transition(.asymmetric(
+                insertion: .move(edge: sessionManager.sessionMode == .onePlace ? .leading : .trailing).combined(with: .opacity),
+                removal: .move(edge: sessionManager.sessionMode == .onePlace ? .trailing : .leading).combined(with: .opacity)
+            ))
+            
+            // Current Activity (shared)
+            CurrentActivityCard()
+            
+            // Quick Actions
+            SessionQuickActions(showingDetails: $showingSessionDetails)
+        }
+        .sheet(isPresented: $showingSessionDetails) {
+            LiveSessionDetailsView()
+        }
+    }
+}
+struct FeatureRow: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                .frame(width: 16)
+            
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.subheadText)
+                .multilineTextAlignment(.leading)
+            
+            Spacer()
         }
     }
 }
 
-// MARK: - Session Mode Badge
 
+// MARK: - Live Indicator Dot
 struct SessionModeBadge: View {
     let mode: SessionMode
     
@@ -218,27 +332,24 @@ struct SessionModeBadge: View {
     
     private var modeIcon: String {
         switch mode {
-        case .manual: return "map.fill"
-        case .passive: return "location.square.fill"
-        case .active: return "location.fill.viewfinder"
+        case .onePlace: return "location.square.fill"
+        case .onTheMove: return "location.fill.viewfinder"
         case .unknown: return "questionmark.circle"
         }
     }
     
     private var modeTitle: String {
         switch mode {
-        case .manual: return "Manual"
-        case .passive: return "Stay-in-Place"
-        case .active: return "Live Tracking"
+        case .onePlace: return "One-Place"
+        case .onTheMove: return "On-the-Move"
         case .unknown: return "Unknown"
         }
     }
     
     private var modeColor: Color {
         switch mode {
-        case .manual: return LociTheme.Colors.primaryAction
-        case .passive: return LociTheme.Colors.secondaryHighlight
-        case .active: return LociTheme.Colors.notificationBadge
+        case .onePlace: return LociTheme.Colors.secondaryHighlight
+        case .onTheMove: return LociTheme.Colors.primaryAction
         case .unknown: return LociTheme.Colors.subheadText
         }
     }
@@ -351,8 +462,6 @@ struct SessionStatCard: View {
     }
 }
 
-// MARK: - Session Progress View
-
 struct SessionProgressView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var dataStore: DataStore
@@ -366,7 +475,7 @@ struct SessionProgressView: View {
                 
                 Spacer()
                 
-                if sessionManager.sessionMode == .active {
+                if sessionManager.sessionMode == .onTheMove {
                     Text("Auto-stops at 6 hours")
                         .font(LociTheme.Typography.caption)
                         .foregroundColor(LociTheme.Colors.subheadText)
@@ -420,7 +529,7 @@ struct SessionProgressView: View {
         guard let startTime = sessionManager.sessionStartTime else { return 0 }
         
         let elapsed = Date().timeIntervalSince(startTime)
-        let maxDuration: TimeInterval = sessionManager.sessionMode == .active ? 6 * 3600 : 12 * 3600 // 6 hours for active, 12 for others
+        let maxDuration: TimeInterval = sessionManager.sessionMode == .onTheMove ? 6 * 3600 : 12 * 3600 // 6 hours for on-the-move, 12 for one-place
         
         return min(elapsed / maxDuration, 1.0)
     }
@@ -453,123 +562,8 @@ struct SessionProgressView: View {
 
 // MARK: - Current Activity Card
 
-struct CurrentActivityCard: View {
-    @EnvironmentObject var dataStore: DataStore
-    @EnvironmentObject var locationManager: LocationManager
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
-            HStack {
-                Image(systemName: "waveform")
-                    .font(.system(size: 16))
-                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                
-                Text("Current Activity")
-                    .font(LociTheme.Typography.subheading)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                
-                Spacer()
-            }
-            
-            if let lastEvent = dataStore.currentSessionEvents.last {
-                RecentTrackView(event: lastEvent)
-            } else {
-                EmptyActivityView()
-            }
-            
-            // Location status
-            LocationStatusView()
-        }
-        .padding(LociTheme.Spacing.medium)
-        .background(LociTheme.Colors.contentContainer)
-        .cornerRadius(LociTheme.CornerRadius.medium)
-    }
-}
 
 // MARK: - Recent Track View
-
-struct RecentTrackView: View {
-    let event: ListeningEvent
-    
-    var body: some View {
-        HStack(spacing: LociTheme.Spacing.small) {
-            Image(systemName: "music.note")
-                .font(.system(size: 20))
-                .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                .frame(width: 32, height: 32)
-                .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
-                .cornerRadius(8)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.trackName)
-                    .font(LociTheme.Typography.body)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                    .lineLimit(1)
-                
-                Text(event.artistName)
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-                    .lineLimit(1)
-                
-                if let building = event.buildingName {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(LociTheme.Colors.primaryAction)
-                        
-                        Text(building)
-                            .font(LociTheme.Typography.caption)
-                            .foregroundColor(LociTheme.Colors.primaryAction)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            Text(timeAgo(from: event.timestamp))
-                .font(LociTheme.Typography.caption)
-                .foregroundColor(LociTheme.Colors.subheadText)
-        }
-    }
-    
-    private func timeAgo(from date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        let minutes = Int(interval) / 60
-        
-        if minutes < 1 {
-            return "Now"
-        } else if minutes < 60 {
-            return "\(minutes)m ago"
-        } else {
-            let hours = minutes / 60
-            return "\(hours)h ago"
-        }
-    }
-}
-
-// MARK: - Empty Activity View
-
-struct EmptyActivityView: View {
-    var body: some View {
-        VStack(spacing: LociTheme.Spacing.small) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 24))
-                .foregroundColor(LociTheme.Colors.subheadText.opacity(0.5))
-            
-            Text("Waiting for music...")
-                .font(LociTheme.Typography.body)
-                .foregroundColor(LociTheme.Colors.subheadText)
-            
-            Text("Start playing music on Spotify to see it appear here")
-                .font(LociTheme.Typography.caption)
-                .foregroundColor(LociTheme.Colors.subheadText.opacity(0.7))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, LociTheme.Spacing.medium)
-    }
-}
 
 // MARK: - Location Status View
 
@@ -668,226 +662,6 @@ struct SessionQuickActions: View {
     }
 }
 
-// MARK: - Live Session Details View
-
-struct LiveSessionDetailsView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var dataStore: DataStore
-    @EnvironmentObject var sessionManager: SessionManager
-    
-    var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: LociTheme.Spacing.large) {
-                    // Session overview
-                    SessionOverviewCard()
-                    
-                    // Track list
-                    if !dataStore.currentSessionEvents.isEmpty {
-                        TrackListSection()
-                    }
-                    
-                    // Location breakdown
-                    if !dataStore.currentSessionEvents.isEmpty {
-                        LocationBreakdownSection()
-                    }
-                }
-                .padding(LociTheme.Spacing.medium)
-            }
-            .background(LociTheme.Colors.appBackground)
-            .navigationTitle("Session Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Session Overview Card
-
-struct SessionOverviewCard: View {
-    @EnvironmentObject var sessionManager: SessionManager
-    @EnvironmentObject var dataStore: DataStore
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
-            Text("Session Overview")
-                .font(LociTheme.Typography.subheading)
-                .foregroundColor(LociTheme.Colors.mainText)
-            
-            VStack(spacing: LociTheme.Spacing.small) {
-                OverviewRow(label: "Mode", value: sessionManager.sessionMode.rawValue.capitalized)
-                OverviewRow(label: "Started", value: formatTime(sessionManager.sessionStartTime))
-                OverviewRow(label: "Tracks Collected", value: "\(dataStore.currentSessionEvents.count)")
-                OverviewRow(label: "Unique Locations", value: "\(uniqueLocations)")
-            }
-        }
-        .padding(LociTheme.Spacing.medium)
-        .background(LociTheme.Colors.contentContainer)
-        .cornerRadius(LociTheme.CornerRadius.medium)
-    }
-    
-    private var uniqueLocations: Int {
-        Set(dataStore.currentSessionEvents.compactMap { $0.buildingName }).count
-    }
-    
-    private func formatTime(_ date: Date?) -> String {
-        guard let date = date else { return "Unknown" }
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-}
-
-// MARK: - Overview Row
-
-struct OverviewRow: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(LociTheme.Typography.body)
-                .foregroundColor(LociTheme.Colors.subheadText)
-            
-            Spacer()
-            
-            Text(value)
-                .font(LociTheme.Typography.body)
-                .foregroundColor(LociTheme.Colors.mainText)
-        }
-    }
-}
-
-// MARK: - Track List Section
-
-struct TrackListSection: View {
-    @EnvironmentObject var dataStore: DataStore
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
-            Text("Recent Tracks")
-                .font(LociTheme.Typography.subheading)
-                .foregroundColor(LociTheme.Colors.mainText)
-            
-            LazyVStack(spacing: LociTheme.Spacing.small) {
-                ForEach(dataStore.currentSessionEvents.suffix(10).reversed(), id: \.id) { event in
-                    TrackRowView(event: event)
-                }
-            }
-        }
-        .padding(LociTheme.Spacing.medium)
-        .background(LociTheme.Colors.contentContainer)
-        .cornerRadius(LociTheme.CornerRadius.medium)
-    }
-}
-
-// MARK: - Track Row View
-
-struct TrackRowView: View {
-    let event: ListeningEvent
-    
-    var body: some View {
-        HStack(spacing: LociTheme.Spacing.small) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.trackName)
-                    .font(LociTheme.Typography.body)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                    .lineLimit(1)
-                
-                Text(event.artistName)
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-                    .lineLimit(1)
-            }
-            
-            Spacer()
-            
-            VStack(alignment: .trailing, spacing: 2) {
-                if let building = event.buildingName {
-                    Text(building)
-                        .font(LociTheme.Typography.caption)
-                        .foregroundColor(LociTheme.Colors.primaryAction)
-                        .lineLimit(1)
-                }
-                
-                Text(formatTime(event.timestamp))
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-            }
-        }
-        .padding(.vertical, LociTheme.Spacing.xSmall)
-    }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-}
-
-// MARK: - Location Breakdown Section
-
-struct LocationBreakdownSection: View {
-    @EnvironmentObject var dataStore: DataStore
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
-            Text("Location Breakdown")
-                .font(LociTheme.Typography.subheading)
-                .foregroundColor(LociTheme.Colors.mainText)
-            
-            VStack(spacing: LociTheme.Spacing.small) {
-                ForEach(locationCounts.sorted(by: { $0.value > $1.value }), id: \.key) { location, count in
-                    LocationBreakdownRow(location: location, count: count, total: dataStore.currentSessionEvents.count)
-                }
-            }
-        }
-        .padding(LociTheme.Spacing.medium)
-        .background(LociTheme.Colors.contentContainer)
-        .cornerRadius(LociTheme.CornerRadius.medium)
-    }
-    
-    private var locationCounts: [String: Int] {
-        Dictionary(grouping: dataStore.currentSessionEvents.compactMap { $0.buildingName }) { $0 }
-            .mapValues { $0.count }
-    }
-}
-
-// MARK: - Location Breakdown Row
-
-struct LocationBreakdownRow: View {
-    let location: String
-    let count: Int
-    let total: Int
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(location)
-                    .font(LociTheme.Typography.body)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                    .lineLimit(1)
-                
-                Text("\(count) tracks")
-                    .font(LociTheme.Typography.caption)
-                    .foregroundColor(LociTheme.Colors.subheadText)
-            }
-            
-            Spacer()
-            
-            Text("\(Int(Double(count) / Double(total) * 100))%")
-                .font(LociTheme.Typography.body)
-                .foregroundColor(LociTheme.Colors.primaryAction)
-        }
-        .padding(.vertical, LociTheme.Spacing.xSmall)
-    }
-}
 
 // MARK: - Status Section
 
@@ -1044,3 +818,1424 @@ struct SettingsView: View {
     }
 }
 
+import Combine
+
+// MARK: - Session Mode Coordinator
+
+struct SessionModeCoordinator: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var selectedMode: SessionMode = .onePlace
+    @State private var showingSessionHistory = false
+    @State private var showingSettings = false
+    @State private var showingSpotifyImport = false
+    @State private var hasShownWelcome = UserDefaults.standard.bool(forKey: "hasShownModeWelcome")
+    
+    var body: some View {
+        ZStack {
+            LociTheme.Colors.appBackground
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header
+                CoordinatorHeader(
+                    showingSettings: $showingSettings,
+                    showingSpotifyImport: $showingSpotifyImport,
+                    showingSessionHistory: $showingSessionHistory
+                )
+                .padding(.horizontal, LociTheme.Spacing.medium)
+                .padding(.top, LociTheme.Spacing.large)
+                
+                // Main Content
+                if sessionManager.isSessionActive {
+                    // Show active session view
+                    ActiveSessionCoordinatorView()
+                } else {
+                    // Show mode selection and setup
+                    SessionModeSelectionCoordinator(selectedMode: $selectedMode)
+                }
+            }
+        }
+        .sheet(isPresented: $showingSessionHistory) {
+            SessionHistoryView()
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+                .environmentObject(spotifyManager)
+                .environmentObject(dataStore)
+        }
+        .sheet(isPresented: $showingSpotifyImport) {
+            SpotifyImportView()
+                .environmentObject(spotifyManager)
+        }
+        .sheet(isPresented: .constant(!hasShownWelcome)) {
+            ModeWelcomeSheet(hasShownWelcome: $hasShownWelcome)
+        }
+        .onAppear {
+            setupInitialState()
+        }
+    }
+    
+    private func setupInitialState() {
+        // If there's an active session, don't override the mode
+        if !sessionManager.isSessionActive {
+            // Set default mode based on user preference or last used
+            selectedMode = UserDefaults.standard.string(forKey: "lastSelectedMode")
+                .flatMap { SessionMode(rawValue: $0) } ?? .onePlace
+        }
+    }
+}
+
+// MARK: - Coordinator Header
+
+struct CoordinatorHeader: View {
+    @Binding var showingSettings: Bool
+    @Binding var showingSpotifyImport: Bool
+    @Binding var showingSessionHistory: Bool
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text("Loci")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .neonText()
+                
+                if sessionManager.isSessionActive {
+                    Text("\(sessionManager.sessionMode.displayName) Session Active")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(sessionManager.sessionMode == .onePlace ?
+                                       LociTheme.Colors.secondaryHighlight :
+                                       LociTheme.Colors.primaryAction)
+                }
+            }
+            
+            Spacer()
+            
+            HStack(spacing: LociTheme.Spacing.small) {
+                // Import Button
+                Button(action: { showingSpotifyImport = true }) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+                
+                // History Button
+                Button(action: { showingSessionHistory = true }) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                // Settings Button
+                Button(action: { showingSettings = true }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                }
+            }
+        }
+    }
+}
+
+
+struct OnePlaceStatsGrid: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            SessionStatCard(
+                icon: "music.note",
+                value: "\(dataStore.currentSessionEvents.count)",
+                label: "Tracks",
+                color: LociTheme.Colors.secondaryHighlight
+            )
+            
+            SessionStatCard(
+                icon: "clock",
+                value: sessionDuration,
+                label: "Active",
+                color: LociTheme.Colors.primaryAction
+            )
+            
+            SessionStatCard(
+                icon: "location.circle",
+                value: "Here",
+                label: "Location",
+                color: LociTheme.Colors.secondaryHighlight
+            )
+        }
+    }
+    
+    private var sessionDuration: String {
+        // Calculate active time
+        return "2h 15m" // Placeholder
+    }
+}
+
+struct OnTheMoveStatsGrid: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            SessionStatCard(
+                icon: "music.note",
+                value: "\(dataStore.currentSessionEvents.count)",
+                label: "Tracks",
+                color: LociTheme.Colors.secondaryHighlight
+            )
+            
+            SessionStatCard(
+                icon: "building.2",
+                value: "\(uniqueLocations)",
+                label: "Places",
+                color: LociTheme.Colors.primaryAction
+            )
+            
+            SessionStatCard(
+                icon: "location.circle",
+                value: "Active",
+                label: "Tracking",
+                color: LociTheme.Colors.secondaryHighlight
+            )
+        }
+    }
+    
+    private var uniqueLocations: Int {
+        Set(dataStore.currentSessionEvents.compactMap { $0.buildingName }).count
+    }
+}
+
+
+
+struct OnePlaceSetupCard: View {
+    @Binding var selectedLocation: String?
+    @Binding var showingLocationPicker: Bool
+    @EnvironmentObject var locationManager: LocationManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "location.square")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                Text("One-Place Session")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+            }
+            
+            // Features
+            VStack(spacing: LociTheme.Spacing.small) {
+                FeatureRow(icon: "infinity", text: "No time limit - session continues until you stop it")
+                FeatureRow(icon: "location.magnifyingglass", text: "Auto-detects when you move to a new building")
+                FeatureRow(icon: "battery.100", text: "Battery efficient with smart location monitoring")
+            }
+            
+            // Location selection (optional)
+            if let location = selectedLocation {
+                HStack {
+                    Text("Starting at: \(location)")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Spacer()
+                    
+                    Button("Change") {
+                        showingLocationPicker = true
+                    }
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+                .padding(LociTheme.Spacing.small)
+                .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+                .cornerRadius(LociTheme.CornerRadius.small)
+            } else {
+                Button("Set Starting Location (Optional)") {
+                    showingLocationPicker = true
+                }
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+// MARK: - On-the-Move Setup Card
+
+struct OnTheMoveSetupCard: View {
+    @Binding var selectedDuration: SessionDuration
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "location.fill.viewfinder")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                
+                Text("On-the-Move Session")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+            }
+            
+            // Features
+            VStack(spacing: LociTheme.Spacing.small) {
+                FeatureRow(icon: "location.fill.viewfinder", text: "Precise GPS tracking every 90 seconds")
+                FeatureRow(icon: "building.2", text: "Track music across multiple locations")
+                FeatureRow(icon: "clock.badge.checkmark", text: "Auto-stops at your chosen time")
+            }
+            
+            // Duration picker
+            VStack(spacing: LociTheme.Spacing.small) {
+                HStack {
+                    Text("Session Duration")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Spacer()
+                    
+                    Text("Max 6 hours")
+                        .font(.system(size: 12))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                SessionDurationPicker(selectedDuration: $selectedDuration, mode: .onTheMove)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+struct ModeOptionButton: View {
+    let mode: SessionMode
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: LociTheme.Spacing.small) {
+                // Icon
+                Image(systemName: mode.icon)
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundColor(iconColor)
+                    .frame(height: 40)
+                
+                // Title
+                Text(mode.displayName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                // Description
+                Text(shortDescription)
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(LociTheme.Spacing.medium)
+            .background(backgroundColor)
+            .overlay(borderOverlay)
+            .cornerRadius(LociTheme.CornerRadius.medium)
+            .scaleEffect(isSelected ? 1.05 : 1.0)
+            .animation(LociTheme.Animation.bouncy, value: isSelected)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var shortDescription: String {
+        switch mode {
+        case .onePlace: return "Stay in one location\nAuto-detects moves"
+        case .onTheMove: return "Move around freely\nTimed sessions"
+        case .unknown: return ""
+        }
+    }
+    
+    private var iconColor: Color {
+        if isSelected {
+            return mode == .onePlace ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.primaryAction
+        } else {
+            return LociTheme.Colors.subheadText
+        }
+    }
+    
+    private var backgroundColor: Color {
+        if isSelected {
+            let baseColor = mode == .onePlace ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.primaryAction
+            return baseColor.opacity(0.1)
+        } else {
+            return LociTheme.Colors.contentContainer
+        }
+    }
+    
+    @ViewBuilder
+    private var borderOverlay: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                .stroke(mode == .onePlace ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.primaryAction, lineWidth: 2)
+        } else {
+            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                .stroke(LociTheme.Colors.disabledState, lineWidth: 1)
+        }
+    }
+}
+struct OnePlaceActiveSessionCard: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Status Header
+            HStack {
+                HStack(spacing: LociTheme.Spacing.small) {
+                    Circle()
+                        .fill(LociTheme.Colors.secondaryHighlight)
+                        .frame(width: 12, height: 12)
+                        .glow(color: LociTheme.Colors.secondaryHighlight, radius: 4)
+                    
+                    Text("ACTIVE SESSION")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+                
+                Spacer()
+                
+                Text("One-Place")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .padding(.horizontal, LociTheme.Spacing.small)
+                    .padding(.vertical, LociTheme.Spacing.xxSmall)
+                    .background(LociTheme.Colors.disabledState.opacity(0.5))
+                    .cornerRadius(LociTheme.CornerRadius.small)
+            }
+            
+            // Current Building
+            VStack(spacing: LociTheme.Spacing.small) {
+                if let building = sessionManager.currentBuilding {
+                    Text("Currently at")
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                    
+                    Text(building)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                } else {
+                    Text("Getting your location...")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                if sessionManager.hasDetectedLocationChange {
+                    HStack(spacing: LociTheme.Spacing.xSmall) {
+                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        
+                        Text("Location updated automatically")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                    }
+                    .padding(.horizontal, LociTheme.Spacing.small)
+                    .padding(.vertical, LociTheme.Spacing.xSmall)
+                    .background(LociTheme.Colors.primaryAction.opacity(0.1))
+                    .cornerRadius(LociTheme.CornerRadius.small)
+                }
+            }
+            
+            // Session Stats
+            HStack(spacing: LociTheme.Spacing.medium) {
+                OnePlaceStatItem(
+                    icon: "music.note",
+                    value: "\(dataStore.currentSessionEvents.count)",
+                    label: "Tracks"
+                )
+                
+                OnePlaceStatItem(
+                    icon: "clock.arrow.circlepath",
+                    value: sessionDuration,
+                    label: "Active"
+                )
+                
+                OnePlaceStatItem(
+                    icon: "location.magnifyingglass",
+                    value: "Auto",
+                    label: "Detection"
+                )
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+    
+    private var sessionDuration: String {
+        guard let elapsed = sessionManager.getSessionElapsed() else { return "0m" }
+        let hours = Int(elapsed) / 3600
+        let minutes = (Int(elapsed) % 3600) / 60
+        
+        if hours > 0 {
+            return "\(hours)h"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+}
+// MARK: - Active Session Coordinator View
+
+struct ActiveSessionCoordinatorView: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: LociTheme.Spacing.large) {
+                // Mode-specific active session view
+                switch sessionManager.sessionMode {
+                case .onePlace:
+                    OnePlaceActiveSessionCard()
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                case .onTheMove:
+                    OnTheMoveActiveSessionCard()
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
+                case .unknown:
+                    UnknownSessionCard()
+                }
+                
+                // Current Activity (shared between modes)
+                CurrentActivityCard()
+                
+                // Quick Session Actions
+                QuickSessionActions()
+                
+                // Session Stats
+                SessionStatsCard()
+            }
+            .padding(.horizontal, LociTheme.Spacing.medium)
+            .padding(.vertical, LociTheme.Spacing.large)
+        }
+        .animation(LociTheme.Animation.smoothEaseInOut, value: sessionManager.sessionMode)
+    }
+}
+struct NewSessionModeSelectionView: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    
+    @State private var selectedMode: SessionMode = .onePlace
+    @State private var selectedDuration: SessionDuration = .twoHours
+    @State private var showingLocationPicker = false
+    @State private var selectedLocation: String?
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Mode Toggle (Clean and simple)
+            ModeToggleCard(selectedMode: $selectedMode)
+            
+            // Mode-specific content
+            Group {
+                switch selectedMode {
+                case .onePlace:
+                    OnePlaceSetupCard(
+                        selectedLocation: $selectedLocation,
+                        showingLocationPicker: $showingLocationPicker
+                    )
+                case .onTheMove:
+                    OnTheMoveSetupCard(selectedDuration: $selectedDuration)
+                case .unknown:
+                    EmptyView()
+                }
+            }
+            .transition(.asymmetric(
+                insertion: .move(edge: selectedMode == .onePlace ? .leading : .trailing).combined(with: .opacity),
+                removal: .move(edge: selectedMode == .onePlace ? .trailing : .leading).combined(with: .opacity)
+            ))
+            .animation(LociTheme.Animation.smoothEaseInOut, value: selectedMode)
+            
+            // Start Button
+            StartSessionButton(
+                mode: selectedMode,
+                duration: selectedMode == .onTheMove ? selectedDuration : nil,
+                location: selectedLocation,
+                canStart: canStartSession
+            )
+        }
+        .sheet(isPresented: $showingLocationPicker) {
+            LocationSelectionView(selectedLocation: $selectedLocation)
+        }
+    }
+    
+    private var canStartSession: Bool {
+        switch selectedMode {
+        case .onePlace:
+            return locationManager.authorizationStatus != .denied &&
+                   locationManager.authorizationStatus != .restricted
+        case .onTheMove:
+            return locationManager.authorizationStatus == .authorizedAlways ||
+                   locationManager.authorizationStatus == .authorizedWhenInUse
+        case .unknown:
+            return false
+        }
+    }
+}
+struct ModeToggleCard: View {
+    @Binding var selectedMode: SessionMode
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Header
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Choose Your Session Type")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Two simple modes for any situation")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            // Mode buttons
+            HStack(spacing: LociTheme.Spacing.medium) {
+                ModeOptionButton(
+                    mode: .onePlace,
+                    isSelected: selectedMode == .onePlace
+                ) {
+                    withAnimation(LociTheme.Animation.smoothEaseInOut) {
+                        selectedMode = .onePlace
+                    }
+                }
+                
+                ModeOptionButton(
+                    mode: .onTheMove,
+                    isSelected: selectedMode == .onTheMove
+                ) {
+                    withAnimation(LociTheme.Animation.smoothEaseInOut) {
+                        selectedMode = .onTheMove
+                    }
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
+// MARK: - Session Mode Selection Coordinator
+
+struct SessionModeSelectionCoordinator: View {
+    @Binding var selectedMode: SessionMode
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: LociTheme.Spacing.large) {
+                // Mode Toggle
+                ModeToggleSegment(selectedMode: $selectedMode)
+                    .padding(.horizontal, LociTheme.Spacing.medium)
+                
+                // Mode-specific view
+                Group {
+                    switch selectedMode {
+                    case .onePlace:
+                        OnePlaceSessionView()
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .leading).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity)
+                            ))
+                    case .onTheMove:
+                        OnTheMoveSessionView()
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
+                    case .unknown:
+                        EmptyView()
+                    }
+                }
+                .animation(LociTheme.Animation.smoothEaseInOut, value: selectedMode)
+            }
+            .padding(.bottom, LociTheme.Spacing.xxLarge)
+        }
+        .onChange(of: selectedMode) { newMode in
+            // Save user preference
+            UserDefaults.standard.set(newMode.rawValue, forKey: "lastSelectedMode")
+        }
+    }
+}
+
+// MARK: - Mode Toggle Segment
+
+struct ModeToggleSegment: View {
+    @Binding var selectedMode: SessionMode
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Header
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Choose Your Session Type")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Swipe between modes or tap to switch")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            // Segmented Control
+            HStack(spacing: 0) {
+                ModeSegmentButton(
+                    mode: .onePlace,
+                    isSelected: selectedMode == .onePlace
+                ) {
+                    withAnimation(LociTheme.Animation.smoothEaseInOut) {
+                        selectedMode = .onePlace
+                    }
+                }
+                
+                ModeSegmentButton(
+                    mode: .onTheMove,
+                    isSelected: selectedMode == .onTheMove
+                ) {
+                    withAnimation(LociTheme.Animation.smoothEaseInOut) {
+                        selectedMode = .onTheMove
+                    }
+                }
+            }
+            .background(LociTheme.Colors.disabledState)
+            .cornerRadius(LociTheme.CornerRadius.medium)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
+// MARK: - Mode Segment Button
+
+struct ModeSegmentButton: View {
+    let mode: SessionMode
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: LociTheme.Spacing.small) {
+                Image(systemName: mode.icon)
+                    .font(.system(size: 16))
+                    .foregroundColor(iconColor)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(textColor)
+                    
+                    Text(shortDescription)
+                        .font(.system(size: 10))
+                        .foregroundColor(subtitleColor)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, LociTheme.Spacing.small)
+            .background(backgroundColor)
+            .cornerRadius(LociTheme.CornerRadius.small)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var shortDescription: String {
+        switch mode {
+        case .onePlace: return "Stay in one location"
+        case .onTheMove: return "Move around freely"
+        case .unknown: return ""
+        }
+    }
+    
+    private var iconColor: Color {
+        isSelected ? LociTheme.Colors.appBackground : modeColor.opacity(0.7)
+    }
+    
+    private var textColor: Color {
+        isSelected ? LociTheme.Colors.appBackground : LociTheme.Colors.mainText
+    }
+    
+    private var subtitleColor: Color {
+        isSelected ? LociTheme.Colors.appBackground.opacity(0.8) : LociTheme.Colors.subheadText
+    }
+    
+    private var backgroundColor: Color {
+        isSelected ? modeColor : Color.clear
+    }
+    
+    private var modeColor: Color {
+        switch mode {
+        case .onePlace: return LociTheme.Colors.secondaryHighlight
+        case .onTheMove: return LociTheme.Colors.primaryAction
+        case .unknown: return LociTheme.Colors.disabledState
+        }
+    }
+}
+struct UnknownSessionDashboard: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 48))
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Unknown Session")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("This session was created with an older version")
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button("End Session") {
+                sessionManager.stopSession()
+            }
+            .lociButton(.primary)
+        }
+        .padding(LociTheme.Spacing.large)
+        .lociCard()
+    }
+}
+
+// MARK: - Unknown Session Card
+
+struct UnknownSessionCard: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 48))
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Unknown Session Type")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("This session was created with an older version of Loci")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button("End Session") {
+                sessionManager.stopSession()
+            }
+            .lociButton(.primary)
+        }
+        .padding(LociTheme.Spacing.large)
+        .lociCard()
+    }
+}
+
+// MARK: - Current Activity Card (Shared)
+
+struct CurrentActivityCard: View {
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "waveform")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                Text("Current Activity")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                if let building = sessionManager.currentBuilding {
+                    Text(building)
+                        .font(.system(size: 12))
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                        .lineLimit(1)
+                }
+            }
+            
+            if let lastEvent = dataStore.currentSessionEvents.last {
+                RecentTrackView(event: lastEvent)
+            } else {
+                EmptyActivityView()
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+// MARK: - Recent Track View
+
+struct RecentTrackView: View {
+    let event: ListeningEvent
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: "music.note")
+                .font(.system(size: 20))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                .frame(width: 32, height: 32)
+                .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+                .cornerRadius(8)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.trackName)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .lineLimit(1)
+                
+                Text(event.artistName)
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(timeAgo(from: event.timestamp))
+                    .font(.system(size: 11))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Image(systemName: sessionModeIcon)
+                    .font(.system(size: 10))
+                    .foregroundColor(sessionModeColor)
+            }
+        }
+    }
+    
+    private var sessionModeIcon: String {
+        switch event.sessionMode {
+        case .onePlace: return "location.square.fill"
+        case .onTheMove: return "location.fill.viewfinder"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+    
+    private var sessionModeColor: Color {
+        switch event.sessionMode {
+        case .onePlace: return LociTheme.Colors.secondaryHighlight
+        case .onTheMove: return LociTheme.Colors.primaryAction
+        case .unknown: return LociTheme.Colors.subheadText
+        }
+    }
+    
+    private func timeAgo(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        let minutes = Int(interval) / 60
+        
+        if minutes < 1 {
+            return "Now"
+        } else if minutes < 60 {
+            return "\(minutes)m ago"
+        } else {
+            let hours = minutes / 60
+            return "\(hours)h ago"
+        }
+    }
+}
+
+// MARK: - Empty Activity View
+
+struct EmptyActivityView: View {
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 24))
+                .foregroundColor(LociTheme.Colors.subheadText.opacity(0.5))
+            
+            Text("Waiting for music...")
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Text("Start playing music on Spotify to see it appear here")
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.subheadText.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, LociTheme.Spacing.medium)
+    }
+}
+
+// MARK: - Quick Session Actions
+
+struct QuickSessionActions: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @State private var showingSessionDetails = false
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            Button("View Details") {
+                showingSessionDetails = true
+            }
+            .lociButton(.secondary)
+            
+            Button("End Session") {
+                sessionManager.stopSession()
+            }
+            .lociButton(.primary)
+        }
+        .sheet(isPresented: $showingSessionDetails) {
+            LiveSessionDetailsView()
+        }
+    }
+}
+
+// MARK: - Session Stats Card
+
+struct SessionStatsCard: View {
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Session Stats")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                Text("Live")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(LociTheme.Colors.secondaryHighlight.opacity(0.2))
+                    .cornerRadius(4)
+            }
+            
+            HStack(spacing: LociTheme.Spacing.medium) {
+                StatItem(
+                    icon: "music.note",
+                    value: "\(dataStore.currentSessionEvents.count)",
+                    label: "Tracks"
+                )
+                
+                StatItem(
+                    icon: "building.2",
+                    value: "\(uniqueLocations)",
+                    label: sessionManager.sessionMode == .onePlace ? "Changes" : "Places"
+                )
+                
+                StatItem(
+                    icon: "clock",
+                    value: sessionDuration,
+                    label: "Duration"
+                )
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+    
+    private var uniqueLocations: Int {
+        if sessionManager.sessionMode == .onePlace {
+            return dataStore.buildingChanges.count
+        } else {
+            return Set(dataStore.currentSessionEvents.compactMap { $0.buildingName }).count
+        }
+    }
+    
+    private var sessionDuration: String {
+        guard let elapsed = sessionManager.getSessionElapsed() else { return "0m" }
+        let hours = Int(elapsed) / 3600
+        let minutes = (Int(elapsed) % 3600) / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+}
+
+// MARK: - Stat Item
+
+struct StatItem: View {
+    let icon: String
+    let value: String
+    let label: String
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.xSmall) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(LociTheme.Colors.mainText)
+            
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundColor(LociTheme.Colors.subheadText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, LociTheme.Spacing.small)
+        .background(LociTheme.Colors.appBackground.opacity(0.5))
+        .cornerRadius(LociTheme.CornerRadius.small)
+    }
+}
+
+// MARK: - Mode Welcome Sheet
+
+struct ModeWelcomeSheet: View {
+    @Binding var hasShownWelcome: Bool
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: LociTheme.Spacing.large) {
+                    // Welcome Header
+                    VStack(spacing: LociTheme.Spacing.medium) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 48))
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                            .glow(color: LociTheme.Colors.secondaryHighlight, radius: 12)
+                        
+                        Text("Welcome to the New Loci")
+                            .font(LociTheme.Typography.heading)
+                            .foregroundColor(LociTheme.Colors.mainText)
+                        
+                        Text("We've simplified session tracking into two powerful modes")
+                            .font(LociTheme.Typography.body)
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    // Mode Explanations
+                    VStack(spacing: LociTheme.Spacing.medium) {
+                        WelcomeModeCard(
+                            mode: .onePlace,
+                            highlights: [
+                                "No time limits",
+                                "Auto-detects location changes",
+                                "Battery efficient",
+                                "Perfect for cafes, offices, home"
+                            ]
+                        )
+                        
+                        WelcomeModeCard(
+                            mode: .onTheMove,
+                            highlights: [
+                                "Precise GPS tracking",
+                                "Multi-location journeys",
+                                "Timed sessions (max 6 hours)",
+                                "Great for commutes, travel"
+                            ]
+                        )
+                    }
+                    
+                    Button("Get Started") {
+                        hasShownWelcome = true
+                        UserDefaults.standard.set(true, forKey: "hasShownModeWelcome")
+                        dismiss()
+                    }
+                    .lociButton(.gradient, isFullWidth: true)
+                }
+                .padding()
+            }
+            .background(LociTheme.Colors.appBackground)
+            .navigationTitle("What's New")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+// MARK: - Welcome Mode Card
+
+struct WelcomeModeCard: View {
+    let mode: SessionMode
+    let highlights: [String]
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: mode.icon)
+                    .font(.system(size: 24))
+                    .foregroundColor(modeColor)
+                
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                    Text(mode.displayName)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Text(mode.description)
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                Spacer()
+            }
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xSmall) {
+                ForEach(highlights, id: \.self) { highlight in
+                    HStack(spacing: LociTheme.Spacing.small) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 12))
+                            .foregroundColor(modeColor)
+                        
+                        Text(highlight)
+                            .font(.system(size: 13))
+                            .foregroundColor(LociTheme.Colors.mainText)
+                        
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(
+            RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                .fill(modeColor.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                        .stroke(modeColor.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var modeColor: Color {
+        switch mode {
+        case .onePlace: return LociTheme.Colors.secondaryHighlight
+        case .onTheMove: return LociTheme.Colors.primaryAction
+        case .unknown: return LociTheme.Colors.disabledState
+        }
+    }
+}
+
+// MARK: - Live Session Details View (Placeholder)
+
+struct LiveSessionDetailsView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var sessionManager: SessionManager
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.large) {
+                    // Session overview
+                    SessionOverviewCard()
+                    
+                    // Track list
+                    if !dataStore.currentSessionEvents.isEmpty {
+                        TrackListSection()
+                    }
+                    
+                    // Location breakdown
+                    if !dataStore.currentSessionEvents.isEmpty {
+                        LocationBreakdownSection()
+                    }
+                }
+                .padding(LociTheme.Spacing.medium)
+            }
+            .background(LociTheme.Colors.appBackground)
+            .navigationTitle("Session Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Placeholder Views for Details
+
+struct SessionOverviewCard: View {
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            Text("Session Overview")
+                .font(LociTheme.Typography.subheading)
+                .foregroundColor(LociTheme.Colors.mainText)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                OverviewRow(label: "Mode", value: sessionManager.sessionMode.displayName)
+                OverviewRow(label: "Started", value: formatTime(sessionManager.sessionStartTime))
+                OverviewRow(label: "Tracks Collected", value: "\(dataStore.currentSessionEvents.count)")
+                OverviewRow(label: "Unique Locations", value: "\(uniqueLocations)")
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+    
+    private var uniqueLocations: Int {
+        Set(dataStore.currentSessionEvents.compactMap { $0.buildingName }).count
+    }
+    
+    private func formatTime(_ date: Date?) -> String {
+        guard let date = date else { return "Unknown" }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct OverviewRow: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Spacer()
+            
+            Text(value)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.mainText)
+        }
+    }
+}
+
+struct TrackListSection: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            Text("Recent Tracks")
+                .font(LociTheme.Typography.subheading)
+                .foregroundColor(LociTheme.Colors.mainText)
+            
+            LazyVStack(spacing: LociTheme.Spacing.small) {
+                ForEach(dataStore.currentSessionEvents.suffix(10).reversed(), id: \.id) { event in
+                    TrackRowView(event: event)
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+struct TrackRowView: View {
+    let event: ListeningEvent
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.trackName)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .lineLimit(1)
+                
+                Text(event.artistName)
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 2) {
+                if let building = event.buildingName {
+                    Text(building)
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                        .lineLimit(1)
+                }
+                
+                Text(formatTime(event.timestamp))
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+        }
+        .padding(.vertical, LociTheme.Spacing.xSmall)
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+struct LocationBreakdownSection: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            Text("Location Breakdown")
+                .font(LociTheme.Typography.subheading)
+                .foregroundColor(LociTheme.Colors.mainText)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                ForEach(locationCounts.sorted(by: { $0.value > $1.value }), id: \.key) { location, count in
+                    LocationBreakdownRow(location: location, count: count, total: dataStore.currentSessionEvents.count)
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+    
+    private var locationCounts: [String: Int] {
+        Dictionary(grouping: dataStore.currentSessionEvents.compactMap { $0.buildingName }) { $0 }
+            .mapValues { $0.count }
+    }
+}
+
+struct LocationBreakdownRow: View {
+    let location: String
+    let count: Int
+    let total: Int
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(location)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .lineLimit(1)
+                
+                Text("\(count) tracks")
+                    .font(LociTheme.Typography.caption)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+            
+            Text("\(Int(Double(count) / Double(total) * 100))%")
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.primaryAction)
+        }
+        .padding(.vertical, LociTheme.Spacing.xSmall)
+    }
+}

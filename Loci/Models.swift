@@ -1,15 +1,54 @@
 import Foundation
 import SwiftData
 
-// MARK: - Session Mode
+// MARK: - Session Mode (Updated for simplified UX)
 
 enum SessionMode: String, CaseIterable, Codable, Identifiable {
-    case manual    // "Manual/Region" mode: user picks building/region from a map
-    case passive   // One-time GPS ping, pin that building for entire session
-    case active    // Continuous (~90s) tracking + partial events
+    case onePlace  // "One-Place" mode: one-time location, stays until significant change
+    case onTheMove // "On the Move" mode: continuous tracking with duration
     case unknown   // Fallback for legacy sessions or errors
     
     var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .onePlace: return "One-Place"
+        case .onTheMove: return "On the Move"
+        case .unknown: return "Unknown"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .onePlace: return "Perfect for staying in one location. Automatically detects when you move to a new building."
+        case .onTheMove: return "Track your music as you move around. Choose how long to track with automatic stop."
+        case .unknown: return "Legacy session mode"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .onePlace: return "location.square.fill"
+        case .onTheMove: return "location.fill.viewfinder"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+    
+    var requiresDuration: Bool {
+        switch self {
+        case .onePlace: return false
+        case .onTheMove: return true
+        case .unknown: return false
+        }
+    }
+    
+    var supportsBackground: Bool {
+        switch self {
+        case .onePlace: return true  // Uses significant location changes
+        case .onTheMove: return true // Continuous tracking
+        case .unknown: return false
+        }
+    }
 }
 
 // MARK: - SwiftData Models
@@ -22,6 +61,11 @@ class Session {
     var durationRaw: String
     var mode: SessionMode
     var privacyLevelRaw: String = SessionPrivacyLevel.friends.rawValue
+    
+    // New properties for improved UX
+    var buildingChanges: [BuildingChange] = []  // Track building transitions for one-place mode
+    var isActive: Bool = false  // For one-place sessions that don't technically "end"
+    
     @Relationship(deleteRule: .cascade) var events: [ListeningEvent] = []
 
     init(startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent] = []) {
@@ -30,11 +74,24 @@ class Session {
         self.durationRaw = duration.rawValue
         self.mode = mode
         self.events = events
+        self.isActive = mode == .onePlace // One-place sessions start as active
     }
 
     var duration: SessionDuration {
         get { SessionDuration(rawValue: durationRaw) ?? .twelveHours }
         set { durationRaw = newValue.rawValue }
+    }
+    
+    // Computed properties for analytics
+    var uniqueLocations: Int {
+        Set(events.compactMap { $0.buildingName }).count
+    }
+    
+    var currentBuilding: String? {
+        if mode == .onePlace && isActive {
+            return buildingChanges.last?.toBuildingName ?? events.last?.buildingName
+        }
+        return events.last?.buildingName
     }
 }
 
@@ -50,8 +107,9 @@ final class ListeningEvent {
     var albumName: String?
     var genre: String?
     var spotifyTrackId: String
-
-    //@Backlink(from: \Session.events) var session: [Session]
+    
+    // New property for better tracking
+    var sessionMode: SessionMode = .unknown
 
     init(timestamp: Date,
          latitude: Double,
@@ -61,7 +119,8 @@ final class ListeningEvent {
          artistName: String,
          albumName: String?,
          genre: String?,
-         spotifyTrackId: String) {
+         spotifyTrackId: String,
+         sessionMode: SessionMode = .unknown) {
         self.timestamp = timestamp
         self.latitude = latitude
         self.longitude = longitude
@@ -71,63 +130,49 @@ final class ListeningEvent {
         self.albumName = albumName
         self.genre = genre
         self.spotifyTrackId = spotifyTrackId
+        self.sessionMode = sessionMode
     }
 }
 
-// MARK: - Non-SwiftData Models
+// MARK: - Building Change Tracking (New)
 
-// SessionData is used for in-memory operations and data transfer
-struct SessionData: Identifiable, Codable {
-    let id: UUID
-    let startTime: Date
-    let endTime: Date
-    let duration: SessionDuration
-    let events: [ListeningEvent]
+@Model
+final class BuildingChange {
+    @Attribute(.unique) var id: UUID = UUID()
+    var timestamp: Date
+    var fromBuildingName: String?
+    var toBuildingName: String
+    var fromLatitude: Double?
+    var fromLongitude: Double?
+    var toLatitude: Double
+    var toLongitude: Double
+    var wasAutoDetected: Bool // vs manual change
     
-    init(id: UUID, startTime: Date, endTime: Date, duration: SessionDuration, events: [ListeningEvent]) {
-        self.id = id
-        self.startTime = startTime
-        self.endTime = endTime
-        self.duration = duration
-        self.events = events
-    }
-    
-    // Computed properties for analytics
-    var uniqueLocations: Int {
-        Set(events.compactMap { $0.buildingName }).count
-    }
-    
-    var topArtist: String? {
-        let artistCounts = Dictionary(grouping: events) { $0.artistName }
-            .mapValues { $0.count }
-        return artistCounts.max { $0.value < $1.value }?.key
-    }
-    
-    var topTrack: String? {
-        let trackCounts = Dictionary(grouping: events) { $0.trackName }
-            .mapValues { $0.count }
-        return trackCounts.max { $0.value < $1.value }?.key
-    }
-    
-    var topGenre: String? {
-        let genreCounts = Dictionary(grouping: events.compactMap { $0.genre }) { $0 }
-            .mapValues { $0.count }
-        return genreCounts.max { $0.value < $1.value }?.key
-    }
-    
-    var totalMinutes: Int {
-        events.count * 90 / 60  // 90 seconds per event
+    init(timestamp: Date,
+         fromBuilding: String?,
+         toBuilding: String,
+         fromCoordinate: (lat: Double, lon: Double)?,
+         toCoordinate: (lat: Double, lon: Double),
+         autoDetected: Bool = true) {
+        self.timestamp = timestamp
+        self.fromBuildingName = fromBuilding
+        self.toBuildingName = toBuilding
+        self.fromLatitude = fromCoordinate?.lat
+        self.fromLongitude = fromCoordinate?.lon
+        self.toLatitude = toCoordinate.lat
+        self.toLongitude = toCoordinate.lon
+        self.wasAutoDetected = autoDetected
     }
 }
 
-// MARK: - Session Duration
+// MARK: - Session Duration (Updated for new modes)
 
 enum SessionDuration: String, CaseIterable, Codable {
     case thirtyMinutes = "30min"
     case oneHour = "1hr"
     case twoHours = "2hr"
     case fourHours = "4hr"
-    case sixHours = "6hr"
+    case sixHours = "6hr"  // Max for onTheMove mode
     case eightHours = "8hr"
     case twelveHours = "12hr"
     case sixteenHours = "16hr"
@@ -157,6 +202,102 @@ enum SessionDuration: String, CaseIterable, Codable {
         case .sixteenHours: return 16 * 60 * 60
         }
     }
+    
+    // Available durations for "On the Move" mode (max 6 hours)
+    static var onTheMoveOptions: [SessionDuration] {
+        return [.thirtyMinutes, .oneHour, .twoHours, .fourHours, .sixHours]
+    }
+}
+
+// MARK: - Spotify Import Mode (New - separate from main session modes)
+
+enum SpotifyImportMode: String, CaseIterable, Codable {
+    case recentTracks = "recent"     // Import recently played tracks
+    case timeRange = "timerange"     // Import tracks from specific time period
+    case playlist = "playlist"       // Import from specific playlist
+    
+    var displayName: String {
+        switch self {
+        case .recentTracks: return "Recent Tracks"
+        case .timeRange: return "Time Period"
+        case .playlist: return "From Playlist"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .recentTracks: return "Import your recently played tracks from Spotify"
+        case .timeRange: return "Import tracks from a specific date and time range"
+        case .playlist: return "Import tracks from one of your Spotify playlists"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .recentTracks: return "clock.arrow.circlepath"
+        case .timeRange: return "calendar.badge.clock"
+        case .playlist: return "music.note.list"
+        }
+    }
+}
+
+// MARK: - Non-SwiftData Models
+
+// SessionData is used for in-memory operations and data transfer
+struct SessionData: Identifiable, Codable {
+    let id: UUID
+    let startTime: Date
+    let endTime: Date
+    let duration: SessionDuration
+    let mode: SessionMode
+    let events: [ListeningEvent]
+    let buildingChanges: [BuildingChange]
+    let isActive: Bool
+    
+    init(id: UUID, startTime: Date, endTime: Date, duration: SessionDuration, mode: SessionMode, events: [ListeningEvent], buildingChanges: [BuildingChange] = [], isActive: Bool = false) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.duration = duration
+        self.mode = mode
+        self.events = events
+        self.buildingChanges = buildingChanges
+        self.isActive = isActive
+    }
+    
+    // Computed properties for analytics
+    var uniqueLocations: Int {
+        Set(events.compactMap { $0.buildingName }).count
+    }
+    
+    var topArtist: String? {
+        let artistCounts = Dictionary(grouping: events) { $0.artistName }
+            .mapValues { $0.count }
+        return artistCounts.max { $0.value < $1.value }?.key
+    }
+    
+    var topTrack: String? {
+        let trackCounts = Dictionary(grouping: events) { $0.trackName }
+            .mapValues { $0.count }
+        return trackCounts.max { $0.value < $1.value }?.key
+    }
+    
+    var topGenre: String? {
+        let genreCounts = Dictionary(grouping: events.compactMap { $0.genre }) { $0 }
+            .mapValues { $0.count }
+        return genreCounts.max { $0.value < $1.value }?.key
+    }
+    
+    var totalMinutes: Int {
+        events.count * 90 / 60  // 90 seconds per event
+    }
+    
+    var currentBuilding: String? {
+        if mode == .onePlace && isActive {
+            return buildingChanges.last?.toBuildingName ?? events.last?.buildingName
+        }
+        return events.last?.buildingName
+    }
 }
 
 // MARK: - Extensions for Codable support
@@ -164,7 +305,7 @@ enum SessionDuration: String, CaseIterable, Codable {
 extension ListeningEvent: Codable {
     enum CodingKeys: String, CodingKey {
         case id, timestamp, latitude, longitude, buildingName
-        case trackName, artistName, albumName, genre, spotifyTrackId
+        case trackName, artistName, albumName, genre, spotifyTrackId, sessionMode
     }
     
     func encode(to encoder: Encoder) throws {
@@ -179,6 +320,7 @@ extension ListeningEvent: Codable {
         try container.encodeIfPresent(albumName, forKey: .albumName)
         try container.encodeIfPresent(genre, forKey: .genre)
         try container.encode(spotifyTrackId, forKey: .spotifyTrackId)
+        try container.encode(sessionMode, forKey: .sessionMode)
     }
     
     convenience init(from decoder: Decoder) throws {
@@ -193,6 +335,7 @@ extension ListeningEvent: Codable {
         let albumName = try container.decodeIfPresent(String.self, forKey: .albumName)
         let genre = try container.decodeIfPresent(String.self, forKey: .genre)
         let spotifyTrackId = try container.decode(String.self, forKey: .spotifyTrackId)
+        let sessionMode = try container.decodeIfPresent(SessionMode.self, forKey: .sessionMode) ?? .unknown
         
         self.init(
             timestamp: timestamp,
@@ -203,9 +346,30 @@ extension ListeningEvent: Codable {
             artistName: artistName,
             albumName: albumName,
             genre: genre,
-            spotifyTrackId: spotifyTrackId
+            spotifyTrackId: spotifyTrackId,
+            sessionMode: sessionMode
         )
         self.id = id
+    }
+}
+
+extension BuildingChange: Codable {
+    enum CodingKeys: String, CodingKey {
+        case id, timestamp, fromBuildingName, toBuildingName
+        case fromLatitude, fromLongitude, toLatitude, toLongitude, wasAutoDetected
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(fromBuildingName, forKey: .fromBuildingName)
+        try container.encode(toBuildingName, forKey: .toBuildingName)
+        try container.encodeIfPresent(fromLatitude, forKey: .fromLatitude)
+        try container.encodeIfPresent(fromLongitude, forKey: .fromLongitude)
+        try container.encode(toLatitude, forKey: .toLatitude)
+        try container.encode(toLongitude, forKey: .toLongitude)
+        try container.encode(wasAutoDetected, forKey: .wasAutoDetected)
     }
 }
 

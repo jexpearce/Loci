@@ -12,17 +12,25 @@ class SessionManager: ObservableObject {
     @Published var isSessionActive = false
     @Published var sessionStartTime: Date?
     @Published var sessionEndTime: Date?
-    @Published private(set) var sessionMode: SessionMode = .active
+    @Published private(set) var sessionMode: SessionMode = .onePlace
+    @Published var currentBuilding: String?
+    @Published var hasDetectedLocationChange = false
     
     private let locationManager = LocationManager.shared
     private let spotifyManager = SpotifyManager.shared
     private let dataStore = DataStore.shared
-    private var manualRegionName: String?    // For Manual/Region mode
+    private let reverseGeocoding = ReverseGeocoding.shared
     
+    // Session management
     private var locationUpdateTimer: Timer?
     private var sessionEndTimer: Timer?
-    private var maxSessionTimer: Timer? // Maximum session length enforcement
+    private var maxSessionTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    
+    // One-place mode specific
+    private var isMonitoringSignificantChanges = false
+    private var lastKnownBuilding: String?
+    private var lastKnownCoordinate: CLLocationCoordinate2D?
     
     // Background task identifiers
     private let backgroundTaskIdentifier = "com.loci.sessionUpdate"
@@ -30,26 +38,42 @@ class SessionManager: ObservableObject {
     
     // Session limits
     private let maxSessionLength: TimeInterval = 12 * 60 * 60 // 12 hours maximum
+    private let onTheMoveMaxLength: TimeInterval = 6 * 60 * 60 // 6 hours for on-the-move
     
     private init() {
-        //setupBackgroundTasks()
         setupNotifications()
+        setupLocationMonitoring()
+        checkForExistingOnePlaceSession()
     }
     
     // MARK: - Session Control
     
-    /// Start a session with the specified mode. Active mode auto-stops after 6 hours.
-    @MainActor func startSession(mode: SessionMode, manualRegion: String? = nil) {
-        guard !isSessionActive else { return }
+    /// Start a session with the specified mode
+    @MainActor func startSession(mode: SessionMode, duration: SessionDuration? = nil, initialBuilding: String? = nil) {
+        guard !isSessionActive || mode == .onePlace else {
+            print("⚠️ Session already active")
+            return
+        }
+        
+        // For one-place mode, check if we should resume or start fresh
+        if mode == .onePlace && isSessionActive {
+            // Just update the current building if provided
+            if let building = initialBuilding {
+                updateOnePlaceBuilding(building)
+            }
+            return
+        }
+        
         isSessionActive = true
         sessionMode = mode
-        manualRegionName = manualRegion   // Will be non-nil if mode == .manual
         sessionStartTime = Date()
         dataStore.clearCurrentSession()
+        hasDetectedLocationChange = false
 
-        // Enforce maximum session length for all modes (12 hours)
+        // Set maximum session length
+        let maxLength = mode == .onTheMove ? onTheMoveMaxLength : maxSessionLength
         maxSessionTimer = Timer.scheduledTimer(
-            timeInterval: maxSessionLength,
+            timeInterval: maxLength,
             target: self,
             selector: #selector(stopSessionDueToMaxLength),
             userInfo: nil,
@@ -57,195 +81,284 @@ class SessionManager: ObservableObject {
         )
 
         switch mode {
-        case .active:
-            // ── "Active" (continuous) workflow: unchanged from before ──
-            locationManager.startTracking()
-            startLocationUpdateCycle()
-            // Auto-stop after 6 hours for active mode (in addition to max length)
-            sessionEndTimer = Timer.scheduledTimer(
-                timeInterval: 6 * 60 * 60, // 6 hours
-                target: self,
-                selector: #selector(stopSession),
-                userInfo: nil,
-                repeats: false
-            )
-
-        case .passive:
-            // ── "Passive" (one‐time) workflow ──
-            // Fetch location once, store building name for later
+        case .onTheMove:
+            startOnTheMoveSession(duration: duration)
+            
+        case .onePlace:
+            startOnePlaceSession(initialBuilding: initialBuilding)
+            
+        case .unknown:
+            print("⚠️ Unknown session mode, treating as one-place")
+            startOnePlaceSession(initialBuilding: initialBuilding)
+        }
+        
+        logEvent(type: .sessionStart)
+    }
+    
+    private func startOnTheMoveSession(duration: SessionDuration?) {
+        // Start continuous location tracking
+        locationManager.startTracking()
+        startLocationUpdateCycle()
+        
+        // Auto-stop after specified duration (default 2 hours, max 6 hours)
+        let sessionDuration = duration?.timeInterval ?? SessionDuration.twoHours.timeInterval
+        let clampedDuration = min(sessionDuration, onTheMoveMaxLength)
+        
+        sessionEndTime = Date().addingTimeInterval(clampedDuration)
+        
+        sessionEndTimer = Timer.scheduledTimer(
+            timeInterval: clampedDuration,
+            target: self,
+            selector: #selector(stopSession),
+            userInfo: nil,
+            repeats: false
+        )
+        
+        print("🎯 Started On-the-Move session for \(clampedDuration/3600) hours")
+    }
+    
+    private func startOnePlaceSession(initialBuilding: String?) {
+        // Get current location once
+        if let building = initialBuilding {
+            currentBuilding = building
+            lastKnownBuilding = building
+            dataStore.setSingleSessionBuilding(building)
+        } else {
             locationManager.requestOneTimeLocation { [weak self] location in
-                guard let self = self, let loc = location else { return }
-                self.locationManager.reverseGeocode(location: loc) { placemark in
-                    let buildingName = placemark ?? "Unknown Place"
+                guard let self = self, let loc = location else {
+                    print("❌ Could not get location for one-place session")
+                    return
+                }
+                
+                self.reverseGeocoding.reverseGeocode(location: loc) { building in
+                    let buildingName = building?.name ?? "Unknown Place"
+                    self.currentBuilding = buildingName
+                    self.lastKnownBuilding = buildingName
+                    self.lastKnownCoordinate = loc.coordinate
                     self.dataStore.setSingleSessionBuilding(buildingName)
                 }
             }
-
-        case .manual:
-            // ── "Manual/Region" workflow ──
-            // We assume the view already collected `manualRegion` from the user.
-            guard let regionName = manualRegionName else {
-                // If somehow `manualRegionName` is nil, we can early‐abort or show an error.
-                return
-            }
-            dataStore.setSingleSessionBuilding(regionName)
-            
-        case .unknown:
-            // ── Unknown mode: fallback to manual behavior ──
-            print("⚠️ Unknown session mode, falling back to manual mode")
-            if let regionName = manualRegionName {
-                dataStore.setSingleSessionBuilding(regionName)
-            } else {
-                dataStore.setSingleSessionBuilding("Unknown Location")
-            }
         }
         
-        // Log session start
-        logEvent(type: .sessionStart)
+        // Start monitoring for significant location changes
+        startSignificantLocationMonitoring()
+        
+        // No auto-stop for one-place sessions
+        sessionEndTime = nil
+        
+        print("📍 Started One-Place session")
     }
     
     @objc func stopSession() {
         guard isSessionActive else { return }
-        isSessionActive = false
+        
+        let endTime = Date()
+        sessionEndTime = endTime
+        
+        // Clean up timers
         sessionEndTimer?.invalidate()
         sessionEndTimer = nil
         maxSessionTimer?.invalidate()
         maxSessionTimer = nil
-        sessionEndTime = Date()
 
         switch sessionMode {
-        case .active:
-            // ── Active mode: same as your old code ──
-            locationManager.stopTracking()
-            locationUpdateTimer?.invalidate()
-            locationUpdateTimer = nil
-            guard let start = sessionStartTime, let end = sessionEndTime else { return }
-            spotifyManager.reconcilePartialEvents(within: start, end: end) { [weak self] enrichedEvents in
-                guard let self = self else { return }
-                self.dataStore.saveSession(
-                    startTime: start,
-                    endTime: end,
-                    duration: .sixHours, // Since we auto-stop after 6 hours or user stops manually
-                    mode: .active,
-                    events: enrichedEvents
-                )
-            }
-
-        case .passive:
-            // ── Passive: Fetch recently-played for the session window ──
-            guard let start = sessionStartTime, let end = sessionEndTime else { return }
-            let building = self.dataStore.singleSessionBuildingName ?? "Unknown Place"
-            spotifyManager.fetchRecentlyPlayed(after: start, before: end) { [weak self] tracks in
-                guard let self = self else { return }
-                let passiveEvents = tracks.map { trackData -> ListeningEvent in
-                    ListeningEvent(
-                        timestamp: trackData.playedAt,
-                        latitude: 0.0,
-                        longitude: 0.0,
-                        buildingName: building,
-                        trackName: trackData.title,
-                        artistName: trackData.artist,
-                        albumName: trackData.album,
-                        genre: nil,
-                        spotifyTrackId: trackData.id
-                    )
-                }
-                self.dataStore.saveSession(
-                    startTime: start,
-                    endTime: end,
-                    duration: self.calculateSessionDuration(start: start, end: end),
-                    mode: .passive,
-                    events: passiveEvents
-                )
-            }
-
-        case .manual:
-            // ── Manual/Region: Exactly like passive, but we used a user-picked region instead of a geocode ──
-            guard let start = sessionStartTime, let end = sessionEndTime else { return }
-            let region = self.dataStore.singleSessionBuildingName ?? "Unknown Place"
-            spotifyManager.fetchRecentlyPlayed(after: start, before: end) { [weak self] tracks in
-                guard let self = self else { return }
-                let manualEvents = tracks.map { trackData -> ListeningEvent in
-                    ListeningEvent(
-                        timestamp: trackData.playedAt,
-                        latitude: 0.0,
-                        longitude: 0.0,
-                        buildingName: region,
-                        trackName: trackData.title,
-                        artistName: trackData.artist,
-                        albumName: trackData.album,
-                        genre: nil,
-                        spotifyTrackId: trackData.id
-                    )
-                }
-                self.dataStore.saveSession(
-                    startTime: start,
-                    endTime: end,
-                    duration: self.calculateSessionDuration(start: start, end: end),
-                    mode: .manual,
-                    events: manualEvents
+        case .onTheMove:
+            stopOnTheMoveSession(endTime: endTime)
+            
+        case .onePlace:
+            stopOnePlaceSession(endTime: endTime)
+            
+        case .unknown:
+            print("⚠️ Stopping unknown session mode")
+            stopOnePlaceSession(endTime: endTime)
+        }
+        
+        logEvent(type: .sessionEnd)
+        resetSessionState()
+    }
+    
+    private func stopOnTheMoveSession(endTime: Date) {
+        // Stop location tracking
+        locationManager.stopTracking()
+        locationUpdateTimer?.invalidate()
+        locationUpdateTimer = nil
+        
+        guard let startTime = sessionStartTime else { return }
+        
+        // Reconcile with Spotify data
+        spotifyManager.reconcilePartialEvents(within: startTime, end: endTime) { [weak self] enrichedEvents in
+            guard let self = self else { return }
+            
+            self.dataStore.saveSession(
+                startTime: startTime,
+                endTime: endTime,
+                duration: self.calculateSessionDuration(start: startTime, end: endTime),
+                mode: .onTheMove,
+                events: enrichedEvents
+            )
+        }
+        
+        print("🏁 Stopped On-the-Move session")
+    }
+    
+    private func stopOnePlaceSession(endTime: Date) {
+        // Stop significant location monitoring
+        stopSignificantLocationMonitoring()
+        
+        guard let startTime = sessionStartTime else { return }
+        let building = currentBuilding ?? "Unknown Place"
+        
+        // Fetch recently played tracks for the session period
+        spotifyManager.fetchRecentlyPlayed(after: startTime, before: endTime) { [weak self] tracks in
+            guard let self = self else { return }
+            
+            let events = tracks.map { track -> ListeningEvent in
+                ListeningEvent(
+                    timestamp: track.playedAt,
+                    latitude: self.lastKnownCoordinate?.latitude ?? 0.0,
+                    longitude: self.lastKnownCoordinate?.longitude ?? 0.0,
+                    buildingName: building,
+                    trackName: track.title,
+                    artistName: track.artist,
+                    albumName: track.album,
+                    genre: nil,
+                    spotifyTrackId: track.id,
+                    sessionMode: .onePlace
                 )
             }
             
-        case .unknown:
-            // ── Unknown mode: treat as manual mode ──
-            print("⚠️ Stopping unknown session mode, treating as manual")
-            guard let start = sessionStartTime, let end = sessionEndTime else { return }
-            let region = self.dataStore.singleSessionBuildingName ?? "Unknown Location"
-            spotifyManager.fetchRecentlyPlayed(after: start, before: end) { [weak self] tracks in
-                guard let self = self else { return }
-                let unknownEvents = tracks.map { trackData -> ListeningEvent in
-                    ListeningEvent(
-                        timestamp: trackData.playedAt,
-                        latitude: 0.0,
-                        longitude: 0.0,
-                        buildingName: region,
-                        trackName: trackData.title,
-                        artistName: trackData.artist,
-                        albumName: trackData.album,
-                        genre: nil,
-                        spotifyTrackId: trackData.id
-                    )
-                }
-                self.dataStore.saveSession(
-                    startTime: start,
-                    endTime: end,
-                    duration: self.calculateSessionDuration(start: start, end: end),
-                    mode: .unknown,
-                    events: unknownEvents
-                )
-            }
+            self.dataStore.saveSession(
+                startTime: startTime,
+                endTime: endTime,
+                duration: self.calculateSessionDuration(start: startTime, end: endTime),
+                mode: .onePlace,
+                events: events
+            )
         }
         
-        // Log session end
-        logEvent(type: .sessionEnd)
-        
-        // Reset session times
+        print("🏁 Stopped One-Place session")
+    }
+    
+    private func resetSessionState() {
+        isSessionActive = false
         sessionStartTime = nil
         sessionEndTime = nil
+        currentBuilding = nil
+        lastKnownBuilding = nil
+        lastKnownCoordinate = nil
+        hasDetectedLocationChange = false
     }
     
     @objc private func stopSessionDueToMaxLength() {
-        print("⏰ Session stopped due to maximum length (12 hours)")
+        print("⏰ Session stopped due to maximum length")
         stopSession()
     }
     
-    // MARK: - Helper Methods
+    // MARK: - One-Place Session Management
     
-    private func calculateSessionDuration(start: Date, end: Date) -> SessionDuration {
-        let duration = end.timeIntervalSince(start)
-        let hours = duration / 3600
+    private func startSignificantLocationMonitoring() {
+        guard !isMonitoringSignificantChanges else { return }
         
-        if hours <= 0.5 { return .thirtyMinutes }
-        else if hours <= 1 { return .oneHour }
-        else if hours <= 2 { return .twoHours }
-        else if hours <= 4 { return .fourHours }
-        else if hours <= 8 { return .eightHours }
-        else if hours <= 12 { return .twelveHours }
-        else { return .sixteenHours }
+        isMonitoringSignificantChanges = true
+        
+        // Listen for significant location changes
+        NotificationCenter.default.publisher(for: .significantLocationChange)
+            .sink { [weak self] _ in
+                self?.checkForBuildingChange()
+            }
+            .store(in: &cancellables)
+        
+        print("📡 Started monitoring significant location changes")
     }
     
-    // MARK: - Location Update Cycle
+    private func stopSignificantLocationMonitoring() {
+        isMonitoringSignificantChanges = false
+        cancellables.removeAll()
+        print("📡 Stopped monitoring significant location changes")
+    }
+    
+    private func checkForBuildingChange() {
+        guard sessionMode == .onePlace, isSessionActive else { return }
+        
+        locationManager.requestOneTimeLocation { [weak self] location in
+            guard let self = self, let loc = location else { return }
+            
+            self.reverseGeocoding.reverseGeocode(location: loc) { building in
+                guard let newBuilding = building else { return }
+                
+                if newBuilding.name != self.lastKnownBuilding {
+                    self.handleBuildingChange(
+                        from: self.lastKnownBuilding,
+                        to: newBuilding.name,
+                        newCoordinate: loc.coordinate
+                    )
+                }
+            }
+        }
+    }
+    
+    private func handleBuildingChange(from oldBuilding: String?, to newBuilding: String, newCoordinate: CLLocationCoordinate2D) {
+        print("🏢 Building changed: \(oldBuilding ?? "nil") → \(newBuilding)")
+        
+        // Create building change record
+        let buildingChange = BuildingChange(
+            timestamp: Date(),
+            fromBuilding: oldBuilding,
+            toBuilding: newBuilding,
+            fromCoordinate: lastKnownCoordinate.map { (lat: $0.latitude, lon: $0.longitude) },
+            toCoordinate: (lat: newCoordinate.latitude, lon: newCoordinate.longitude),
+            autoDetected: true
+        )
+        
+        // Update session state
+        currentBuilding = newBuilding
+        lastKnownBuilding = newBuilding
+        lastKnownCoordinate = newCoordinate
+        hasDetectedLocationChange = true
+        
+        // Update data store
+        dataStore.setSingleSessionBuilding(newBuilding)
+        dataStore.addBuildingChange(buildingChange)
+        
+        // Notify UI
+        NotificationCenter.default.post(
+            name: .buildingChangeDetected,
+            object: buildingChange
+        )
+    }
+    
+    private func updateOnePlaceBuilding(_ building: String) {
+        guard sessionMode == .onePlace else { return }
+        
+        currentBuilding = building
+        lastKnownBuilding = building
+        dataStore.setSingleSessionBuilding(building)
+        
+        print("📍 Updated one-place building: \(building)")
+    }
+    
+    // MARK: - App Lifecycle Management
+    
+    private func checkForExistingOnePlaceSession() {
+        // Check if there's an active one-place session from previous app launch
+        if let activeSession = dataStore.getActiveOnePlaceSession() {
+            print("🔄 Resuming one-place session")
+            
+            isSessionActive = true
+            sessionMode = .onePlace
+            sessionStartTime = activeSession.startTime
+            currentBuilding = activeSession.currentBuilding
+            lastKnownBuilding = activeSession.currentBuilding
+            
+            // Check if location has changed since last time
+            checkForBuildingChange()
+            
+            // Resume monitoring
+            startSignificantLocationMonitoring()
+        }
+    }
+    
+    // MARK: - On-the-Move Location Updates
     
     private func startLocationUpdateCycle() {
         // Perform first update immediately
@@ -258,82 +371,132 @@ class SessionManager: ObservableObject {
     }
     
     private func performLocationUpdate() {
-        // Start background task to ensure we complete our work
-
         let bgTaskID = BackgroundTaskManager.shared.beginTask("com.loci.sessionUpdate")
         defer { BackgroundTaskManager.shared.endTask(bgTaskID) }
 
-
-          // Get current location
-          guard let location = locationManager.currentLocation else {
-              print("❌ No location available")
-                    return
-                }
+        guard let location = locationManager.currentLocation else {
+            print("❌ No location available for update")
+            return
+        }
         
         print("📍 Performing location update at \(Date().formatted(date: .omitted, time: .standard))")
         
         Task { [weak self] in
-                guard let self = self else { return }
+            guard let self = self else { return }
 
-                // Turn CoreLocation into a CLPlacemark lookup
-                let clLocation = CLLocation(
-                    latitude: location.coordinate.latitude,
-                    longitude: location.coordinate.longitude
-                )
-                let building = await GeocodingService.shared.reverseGeocode(clLocation)
+            let clLocation = CLLocation(
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude
+            )
+            
+            let building = await GeocodingService.shared.reverseGeocode(clLocation)
 
-                // Now fetch Spotify
-                self.spotifyManager.getCurrentTrack { track in
-                    if let track = track {
-                        let event = ListeningEvent(
-                            timestamp: Date(),
-                            latitude: location.coordinate.latitude,
-                            longitude: location.coordinate.longitude,
-                            buildingName: building,
-                            trackName: track.name,
-                            artistName: track.artist,
-                            albumName: track.album,
-                            genre: track.genre,
-                            spotifyTrackId: track.id
-                        )
+            self.spotifyManager.getCurrentTrack { track in
+                if let track = track {
+                    let event = ListeningEvent(
+                        timestamp: Date(),
+                        latitude: location.coordinate.latitude,
+                        longitude: location.coordinate.longitude,
+                        buildingName: building,
+                        trackName: track.name,
+                        artistName: track.artist,
+                        albumName: track.album,
+                        genre: track.genre,
+                        spotifyTrackId: track.id,
+                        sessionMode: .onTheMove
+                    )
 
-                        // Persist + analytics
-                        Task { @MainActor in
-                            self.dataStore.addEvent(event)
-                        }
-                        AnalyticsEngine.shared.processNewEvent(event)
-
-                        print("✅ Logged: \(track.name) by \(track.artist) at \(building ?? "Unknown location")")
+                    Task { @MainActor in
+                        self.dataStore.addEvent(event)
                     }
-                    // no need to explicitly end—our defer up top handles it
+                    AnalyticsEngine.shared.processNewEvent(event)
+
+                    print("✅ Logged: \(track.name) by \(track.artist) at \(building ?? "Unknown location")")
                 }
             }
-    }
-    
-    
-    // MARK: - Background Tasks Setup
-    
-    private func setupBackgroundTasks() {
-        // Register background task
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundTaskIdentifier, using: nil) { task in
-            self.handleBackgroundTask(task: task)
         }
     }
     
-    func handleBackgroundTask(task: BGTask) {
-        // Schedule next background task
-        scheduleNextBackgroundTask()
+    // MARK: - Helper Methods
+    
+    private func calculateSessionDuration(start: Date, end: Date) -> SessionDuration {
+        let duration = end.timeIntervalSince(start)
+        let hours = duration / 3600
         
-        // Perform update if session is active
-        if isSessionActive {
-            performLocationUpdate()
-        }
-        
-        // Mark task as completed
-        task.setTaskCompleted(success: true)
+        if hours <= 0.5 { return .thirtyMinutes }
+        else if hours <= 1 { return .oneHour }
+        else if hours <= 2 { return .twoHours }
+        else if hours <= 4 { return .fourHours }
+        else if hours <= 6 { return .sixHours }
+        else if hours <= 8 { return .eightHours }
+        else if hours <= 12 { return .twelveHours }
+        else { return .sixteenHours }
     }
     
-    private func scheduleNextBackgroundTask() {
+    // MARK: - Location Monitoring Setup
+    
+    private func setupLocationMonitoring() {
+        // Monitor for significant location changes even when app is closed
+        locationManager.$currentLocation
+            .compactMap { $0 }
+            .sink { [weak self] location in
+                self?.handleLocationUpdate(location)
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func handleLocationUpdate(_ location: CLLocation) {
+        // Only process for one-place sessions
+        guard sessionMode == .onePlace, isSessionActive else { return }
+        
+        // Check if this is a significant change
+        if let lastCoordinate = lastKnownCoordinate {
+            let lastLocation = CLLocation(latitude: lastCoordinate.latitude, longitude: lastCoordinate.longitude)
+            let distance = location.distance(from: lastLocation)
+            
+            // If moved more than 100 meters, check for building change
+            if distance > 100 {
+                checkForBuildingChange()
+            }
+        }
+    }
+    
+    // MARK: - Notifications Setup
+    
+    private func setupNotifications() {
+        // Listen for app lifecycle events
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                self?.handleAppDidEnterBackground()
+            }
+            .store(in: &cancellables)
+        
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                self?.handleAppWillEnterForeground()
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func handleAppDidEnterBackground() {
+        if sessionMode == .onTheMove && isSessionActive {
+            // Schedule background task for on-the-move sessions
+            scheduleBackgroundTask()
+        }
+        // One-place sessions use significant location changes, no additional background tasks needed
+    }
+    
+    private func handleAppWillEnterForeground() {
+        // Cancel any pending background tasks
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: backgroundTaskIdentifier)
+        
+        // For one-place sessions, check for location changes
+        if sessionMode == .onePlace && isSessionActive {
+            checkForBuildingChange()
+        }
+    }
+    
+    private func scheduleBackgroundTask() {
         let request = BGAppRefreshTaskRequest(identifier: backgroundTaskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 90) // 90 seconds
         
@@ -344,24 +507,27 @@ class SessionManager: ObservableObject {
         }
     }
     
-    // MARK: - Notifications
+    // MARK: - Public Interface for UI
     
-    private func setupNotifications() {
-        // Listen for app lifecycle events
-        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
-            .sink { [weak self] _ in
-                if self?.isSessionActive == true {
-                    self?.scheduleNextBackgroundTask()
-                }
-            }
-            .store(in: &cancellables)
-        
-        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
-            .sink { [weak self] _ in
-                // Cancel any pending background tasks when returning to foreground
-                BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: self?.backgroundTaskIdentifier ?? "")
-            }
-            .store(in: &cancellables)
+    func canStartSession(mode: SessionMode) -> Bool {
+        switch mode {
+        case .onePlace:
+            return true // Can always start/resume one-place
+        case .onTheMove:
+            return !isSessionActive || sessionMode != .onTheMove
+        case .unknown:
+            return false
+        }
+    }
+    
+    func getSessionTimeRemaining() -> TimeInterval? {
+        guard sessionMode == .onTheMove, let endTime = sessionEndTime else { return nil }
+        return max(0, endTime.timeIntervalSince(Date()))
+    }
+    
+    func getSessionElapsed() -> TimeInterval? {
+        guard let startTime = sessionStartTime else { return nil }
+        return Date().timeIntervalSince(startTime)
     }
     
     // MARK: - Logging
@@ -390,4 +556,11 @@ enum SessionEventType {
     case sessionEnd
     case locationUpdate
     case spotifyUpdate
+}
+
+// MARK: - Notification Extensions
+
+extension Notification.Name {
+    static let buildingChangeDetected = Notification.Name("buildingChangeDetected")
+    static let significantLocationChange = Notification.Name("significantLocationChange")
 }

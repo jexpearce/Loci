@@ -377,20 +377,6 @@ struct Pagination: Decodable {
     let totalPages: Int
 }
 
-// MARK: - Request Models
-
-struct SessionUploadRequest: Encodable {
-    let startTime: Date
-    let endTime: Date
-    let duration: Int
-    let events: [ListeningEvent]
-}
-
-struct EventBatchRequest: Encodable {
-    let events: [ListeningEvent]
-    let sessionId: UUID
-}
-
 // MARK: - Response Models for Loci
 
 struct LeaderboardResponse: Decodable {
@@ -416,4 +402,147 @@ struct MatchesMeta: Decodable {
     let totalMatches: Int
     let newMatches: Int
     let lastChecked: Date
+}
+struct ListenerRanking: Codable {
+    let userId: String
+    let displayName: String?
+    let playCount: Int
+    let uniqueTracks: Int
+    let favoriteGenre: String?
+    let rank: Int
+    let badge: String?
+    let sessionModeBreakdown: [String: Int] // SessionMode breakdown as strings for API
+}
+
+struct MatchResult: Codable {
+    let id: String
+    let userId: String
+    let matchedUserId: String
+    let compatibilityScore: Double
+    let sharedArtists: [String]
+    let sharedGenres: [String]
+    let sharedLocations: [String]
+    let matchType: String // "artist", "genre", "location", "time"
+    let timestamp: Date
+    let isNew: Bool
+}
+
+struct UserProfile: Codable {
+    let id: String
+    let displayName: String
+    let email: String?
+    let spotifyConnected: Bool
+    let joinedDate: Date
+    let totalSessions: Int
+    let totalTracks: Int
+    let favoriteLocations: [String]
+    let topGenres: [String]
+    let sessionModePreference: String?
+    let privacyLevel: String
+}
+
+// MARK: - API Request Models (Updated for new session modes)
+
+struct SessionUploadRequest: Encodable {
+    let startTime: Date
+    let endTime: Date
+    let duration: Int // Duration in seconds
+    let mode: String // SessionMode as string for API
+    let events: [ListeningEventAPI]
+    let buildingChanges: [BuildingChangeAPI]?
+    let privacyLevel: String
+}
+
+struct ListeningEventAPI: Encodable {
+    let id: String
+    let timestamp: Date
+    let latitude: Double
+    let longitude: Double
+    let buildingName: String?
+    let trackName: String
+    let artistName: String
+    let albumName: String?
+    let genre: String?
+    let spotifyTrackId: String
+    let sessionMode: String // SessionMode as string
+}
+
+struct BuildingChangeAPI: Encodable {
+    let id: String
+    let timestamp: Date
+    let fromBuildingName: String?
+    let toBuildingName: String
+    let fromLatitude: Double?
+    let fromLongitude: Double?
+    let toLatitude: Double
+    let toLongitude: Double
+    let wasAutoDetected: Bool
+}
+
+struct EventBatchRequest: Encodable {
+    let events: [ListeningEventAPI]
+    let sessionId: String
+    let sessionMode: String
+}
+
+struct BuildingStatsRequest: Encodable {
+    let buildingName: String
+    let timeRange: String
+    let includeSessionModes: Bool
+}
+
+struct TrendAnalysisRequest: Encodable {
+    let timeRange: String
+    let includeSessionModes: Bool
+    let minPlayCount: Int?
+    let filterByLocation: String?
+}
+
+// MARK: - Additional Response Types
+
+struct BuildingStatsResponse: Decodable {
+    let buildingName: String
+    let timeRange: String
+    let totalSessions: Int
+    let sessionModeBreakdown: [String: Int]
+    let totalEvents: Int
+    let uniqueUsers: Int
+    let topTracks: [TrackRanking]
+    let topArtists: [ArtistRanking]
+    let topGenres: [GenreRanking]
+    let peakHours: [Int]
+    let averageSessionLength: Double
+    let buildingCategory: String
+    let lastUpdated: Date
+}
+
+struct BuildingChangeUploadRequest: Encodable {
+    let sessionId: String
+    let changes: [BuildingChangeAPI]
+}
+
+struct SessionModeStatsResponse: Decodable {
+    let onePlace: ModeStatsAPI
+    let onTheMove: ModeStatsAPI
+    let totalSessions: Int
+    let generatedAt: Date
+}
+
+struct ModeStatsAPI: Decodable {
+    let mode: String
+    let totalSessions: Int
+    let totalEvents: Int
+    let averageDuration: Double
+    let uniqueBuildings: Int
+    let topBuildings: [BuildingRankingAPI]
+    let averageTracksPerSession: Double
+    let buildingChanges: Int?
+    let batteryEfficiencyScore: Double
+}
+
+struct BuildingRankingAPI: Decodable {
+    let name: String
+    let visitCount: Int
+    let sessionCount: Int
+    let lastVisit: Date?
 }

@@ -378,14 +378,6 @@ struct Friendship: Codable, Identifiable {
     }
 }
 
-struct UserProfile: Codable, Identifiable {
-    let id: String
-    let email: String
-    let displayName: String
-    let profileImageURL: String?
-    let joinedDate: Date
-}
-
 struct FriendActivity: Codable, Identifiable {
     let id: String
     let friendId: String
