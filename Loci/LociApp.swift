@@ -70,11 +70,12 @@ struct MainAppView: View {
                 }
                 .tag(0)
             
-            // Discovery tab
-            LocationDiscoveryView()
+            // Leaderboards tab
+            LeaderboardView()
+                .environmentObject(LeaderboardManager.shared)
                 .tabItem {
-                    Image(systemName: "location.magnifyingglass")
-                    Text("Discover")
+                    Image(systemName: "chart.bar.xaxis")
+                    Text("Leaderboards")
                 }
                 .tag(1)
             

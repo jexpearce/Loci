@@ -674,7 +674,7 @@ struct SelectedLocation {
 
 struct ImportBatch: Identifiable, Codable {
     let id: UUID
-    let tracks: [SpotifyRecentTrack]
+    let tracks: [SpotifyImportTrack]  // ✅ Correct type
     let location: String
     let assignmentType: LocationAssignmentType
     let importedAt: Date
@@ -782,10 +782,10 @@ enum SpotifyError: Error {
 @Model
 class ImportBatchEntity {
     @Attribute(.unique) var id: UUID
-    var tracksData: Data // JSON encoded SpotifyRecentTrack array
-    var location: String
-    var assignmentTypeRaw: String
-    var importedAt: Date
+    var tracksData: Data // JSON encoded SpotifyImportTrack array  // ✅ Update comment
+        var location: String
+        var assignmentTypeRaw: String
+        var importedAt: Date
     
     init(id: UUID, tracksData: Data, location: String, assignmentType: LocationAssignmentType, importedAt: Date) {
         self.id = id
@@ -799,9 +799,9 @@ class ImportBatchEntity {
         LocationAssignmentType(rawValue: assignmentTypeRaw) ?? .region
     }
     
-    var tracks: [SpotifyRecentTrack] {
-        (try? JSONDecoder().decode([SpotifyRecentTrack].self, from: tracksData)) ?? []
-    }
+    var tracks: [SpotifyImportTrack] {  // ✅ Change return type
+            (try? JSONDecoder().decode([SpotifyImportTrack].self, from: tracksData)) ?? []
+        }
     
     static func from(_ batch: ImportBatch) -> ImportBatchEntity {
         let tracksData = (try? JSONEncoder().encode(batch.tracks)) ?? Data()

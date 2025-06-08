@@ -14,7 +14,7 @@ class LeaderboardManager: ObservableObject {
     @Published var availableGenres: [String] = []
     
     private let dataStore = DataStore.shared
-    private let firebaseManager = FirebaseManager.shared
+    let firebaseManager = FirebaseManager.shared
     private let locationManager = LocationManager.shared
     
     // Cache
@@ -45,46 +45,43 @@ class LeaderboardManager: ObservableObject {
         
         isLoading = true
         
-        do {
-            // Get current location context
-            let locationContext = await getCurrentLocationContext()
+        // Get current location context
+        let locationContext = await getCurrentLocationContext()
+        
+        // Load all leaderboards for each scope
+        var newLeaderboards: [LocationScope: [LeaderboardType: LeaderboardData]] = [:]
+        
+        for scope in LocationScope.allCases {
+            newLeaderboards[scope] = [:]
             
-            // Load all leaderboards for each scope
-            var newLeaderboards: [LocationScope: [LeaderboardType: LeaderboardData]] = [:]
+            // Overall leaderboard for all scopes
+            if let overallData = await loadLeaderboard(scope: scope, type: .overall, context: locationContext) {
+                newLeaderboards[scope]?[.overall] = overallData
+            }
             
-            for scope in LocationScope.allCases {
-                newLeaderboards[scope] = [:]
-                
-                // Overall leaderboard for all scopes
-                if let overallData = await loadLeaderboard(scope: scope, type: .overall, context: locationContext) {
-                    newLeaderboards[scope]?[.overall] = overallData
+            // Artist and genre leaderboards for non-building scopes
+            if scope != .building {
+                for artist in availableArtists.prefix(10) { // Top 10 artists
+                    if let artistData = await loadLeaderboard(scope: scope, type: .artist(artist), context: locationContext) {
+                        newLeaderboards[scope]?[.artist(artist)] = artistData
+                    }
                 }
                 
-                // Artist and genre leaderboards for non-building scopes
-                if scope != .building {
-                    for artist in availableArtists.prefix(10) { // Top 10 artists
-                        if let artistData = await loadLeaderboard(scope: scope, type: .artist(artist), context: locationContext) {
-                            newLeaderboards[scope]?[.artist(artist)] = artistData
-                        }
-                    }
-                    
-                    for genre in availableGenres.prefix(8) { // Top 8 genres
-                        if let genreData = await loadLeaderboard(scope: scope, type: .genre(genre), context: locationContext) {
-                            newLeaderboards[scope]?[.genre(genre)] = genreData
-                        }
+                for genre in availableGenres.prefix(8) { // Top 8 genres
+                    if let genreData = await loadLeaderboard(scope: scope, type: .genre(genre), context: locationContext) {
+                        newLeaderboards[scope]?[.genre(genre)] = genreData
                     }
                 }
             }
-            
-            // Update published properties
-            currentLeaderboards = newLeaderboards
-            userSummary = calculateUserSummary(from: newLeaderboards)
-            lastLocationContext = locationContext
-            lastRefresh = Date()
-            
-        } catch {
-            print("❌ Failed to load leaderboards: \(error)")
         }
+        
+        // Update published properties
+        currentLeaderboards = newLeaderboards
+        userSummary = calculateUserSummary(from: newLeaderboards)
+        lastLocationContext = locationContext
+        lastRefresh = Date()
+        
+        print("✅ Loaded \(newLeaderboards.count) leaderboard scopes with data")
         
         isLoading = false
     }
@@ -100,14 +97,25 @@ class LeaderboardManager: ObservableObject {
     // MARK: - Data Loading
     
     private func loadLeaderboard(scope: LocationScope, type: LeaderboardType, context: LocationContext) async -> LeaderboardData? {
-        // For now, use local data aggregation
-        // In production, this would call Firebase/backend APIs
+        // Get user data from DataStore (which aggregates sessions and imports)
+        let userData = dataStore.getLeaderboardData(scope: scope, type: type, context: context)
+        guard !userData.isEmpty else { 
+            print("⚠️ No user data found for \(scope.displayName) - \(type.displayName)")
+            return nil 
+        }
         
-        let sessions = getRelevantSessions(for: scope, context: context)
-        guard !sessions.isEmpty else { return nil }
+        print("✅ Found \(userData.count) users for \(scope.displayName) - \(type.displayName)")
         
-        // Aggregate data based on type
-        let userStats = calculateUserStats(sessions: sessions, type: type, scope: scope)
+        // Convert to UserStats for leaderboard display
+        let scoreType: ScoreType = (type == .overall && scope == .building) ? .songCount : .minutes
+        let userStats = userData.map { user in
+            UserStats(
+                userId: user.userId,
+                username: user.username,
+                profileImageURL: user.profileImageURL,
+                score: user.getScore(for: type, scoreType: scoreType)
+            )
+        }.sorted { $0.score > $1.score }
         
         // Convert to leaderboard entries
         let entries = userStats.enumerated().map { index, stat in
@@ -166,26 +174,7 @@ class LeaderboardManager: ObservableObject {
         }
     }
     
-    private func calculateUserStats(sessions: [Session], type: LeaderboardType, scope: LocationScope) -> [UserStats] {
-        // Get real user data from DataStore
-        let userData = dataStore.getLeaderboardData(
-            scope: scope,
-            type: type,
-            context: lastLocationContext ?? LocationContext(building: nil, region: nil, state: nil, country: nil, coordinate: nil)
-        )
-        
-        // Convert to UserStats for leaderboard display
-        let scoreType: ScoreType = (type == .overall && scope == .building) ? .songCount : .minutes
-        
-        return userData.map { user in
-            UserStats(
-                userId: user.userId,
-                username: user.username,
-                profileImageURL: user.profileImageURL,
-                score: user.getScore(for: type, scoreType: scoreType)
-            )
-        }.sorted { $0.score > $1.score }
-    }
+
     
     private func calculateScore(sessions: [Session], type: LeaderboardType, userId: String) -> Double {
         // For demo, add some randomness for fake users

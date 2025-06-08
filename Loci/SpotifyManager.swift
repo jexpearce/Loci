@@ -329,12 +329,72 @@ class SpotifyManager: NSObject, ObservableObject {
     }
 
     func getValidAccessToken() async throws -> String {
-        // Implementation depends on your current auth flow
-        guard let tokenData = try? KeychainHelper.read(service: "spotify", account: "accessToken"),
-              let token = String(data: tokenData, encoding: .utf8) else {
+        // Check if we have a valid token first
+        if let tokenData = try? KeychainHelper.read(service: service, account: "accessToken"),
+           let token = String(data: tokenData, encoding: .utf8),
+           let expiryData = try? KeychainHelper.read(service: service, account: "expiryDate"),
+           let expiryDate = try? JSONDecoder().decode(Date.self, from: expiryData) {
+            
+            // If token is still valid (with 5-minute buffer), return it
+            if expiryDate.timeIntervalSinceNow > 300 {
+                return token
+            }
+            
+            // Token is expired or about to expire, try to refresh
+            print("🔄 Access token expired, attempting refresh...")
+            try await refreshAccessToken()
+            
+            // Get the new token
+            if let newTokenData = try? KeychainHelper.read(service: service, account: "accessToken"),
+               let newToken = String(data: newTokenData, encoding: .utf8) {
+                return newToken
+            }
+        }
+        
+        throw SpotifyError.notAuthenticated
+    }
+
+    private func refreshAccessToken() async throws {
+        guard let refreshTokenData = try? KeychainHelper.read(service: service, account: "refreshToken"),
+              let refreshToken = String(data: refreshTokenData, encoding: .utf8) else {
             throw SpotifyError.notAuthenticated
         }
-        return token
+        
+        let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        
+        let body = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID
+        ].map { "\($0.key)=\($0.value)" }
+         .joined(separator: "&")
+         .data(using: .utf8)!
+        
+        request.httpBody = body
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            
+            if let errorData = String(data: data, encoding: .utf8) {
+                print("❌ Token refresh failed: \(errorData)")
+            }
+            
+            // If refresh fails, user needs to re-authenticate
+            DispatchQueue.main.async {
+                self.isAuthenticated = false
+            }
+            throw SpotifyError.notAuthenticated
+        }
+        
+        let tokens = try JSONDecoder().decode(TokenResponse.self, from: data)
+        try saveTokens(tokens)
+        
+        print("✅ Access token refreshed successfully")
     }
 
     // MARK: — Internal OAuth & Token Handling
@@ -433,14 +493,10 @@ class SpotifyManager: NSObject, ObservableObject {
         }
     }
 
-    /// Get currently playing track (for SessionManager)
     func getCurrentTrack(completion: @escaping (SpotifyTrack?) -> Void) {
         Task {
             do {
-                guard let accessToken = try await getValidAccessToken() else {
-                    DispatchQueue.main.async { completion(nil) }
-                    return
-                }
+                let accessToken = try await getValidAccessToken()
                 
                 let url = URL(string: "https://api.spotify.com/v1/me/player/currently-playing")!
                 var request = URLRequest(url: url)

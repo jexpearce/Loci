@@ -297,6 +297,11 @@ struct EnhancedSpotifyImportView: View {
         // Update SpotifyManager
         spotifyManager.hasRecentImports = true
         
+        // Manually trigger leaderboard refresh
+        Task { @MainActor in
+            await LeaderboardManager.shared.loadLeaderboards(forceRefresh: true)
+        }
+        
         // Show success feedback
         NotificationManager.shared.showImportSuccessNotification(
             trackCount: tracksToImport.count,
@@ -619,6 +624,11 @@ struct SpotifyImportView: View {
         
         // Update session history
         dataStore.sessionHistory.insert(session, at: 0)
+        
+        // Manually trigger leaderboard refresh
+        Task { @MainActor in
+            await LeaderboardManager.shared.loadLeaderboards(forceRefresh: true)
+        }
         
         // Show success notification
         NotificationManager.shared.notifyImportCompleted(trackCount: importedTracks.count)

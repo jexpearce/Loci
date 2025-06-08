@@ -2682,6 +2682,7 @@ struct LeaderboardPreviewSection: View {
         .lociCard()
         .sheet(isPresented: $showingFullLeaderboards) {
             LeaderboardView()
+                .environmentObject(leaderboardManager)
         }
         .onAppear {
             Task {

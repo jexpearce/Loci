@@ -157,6 +157,7 @@ class EnrichmentEngine: ObservableObject {
         // - Only goes back ~3 hours
         
         guard let accessToken = try? await spotifyManager.getValidAccessToken() else {
+            print("❌ No valid access token for recently played")
             return []
         }
         
@@ -171,10 +172,32 @@ class EnrichmentEngine: ObservableObject {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let response = try JSONDecoder().decode(RecentlyPlayedResponse.self, from: data)
+            let (data, response) = try await URLSession.shared.data(for: request)
             
-            return response.items.compactMap { item in
+            // Check HTTP status code first
+            if let httpResponse = response as? HTTPURLResponse {
+                print("🔍 Spotify API status: \(httpResponse.statusCode)")
+                
+                if httpResponse.statusCode != 200 {
+                    // Log the error response
+                    if let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ Spotify API error response: \(errorString)")
+                    }
+                    return []
+                }
+            }
+            
+            // Try to decode the response
+            let decoder = JSONDecoder()
+            
+            // First, let's see what we actually got
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("📦 Raw Spotify response: \(jsonString)")
+            }
+            
+            let recentlyPlayedResponse = try decoder.decode(RecentlyPlayedResponse.self, from: data)
+            
+            return recentlyPlayedResponse.items.compactMap { item in
                 SpotifyRecentTrack(
                     track: SpotifyTrack(
                         id: item.track.id,
@@ -574,4 +597,12 @@ private struct SpotifyArtistResponse: Decodable {
 struct SpotifyRecentTrack {
     let track: SpotifyTrack
     let playedAt: Date
+}
+private struct SpotifyErrorResponse: Decodable {
+    let error: SpotifyError
+    
+    struct SpotifyError: Decodable {
+        let status: Int
+        let message: String
+    }
 }
