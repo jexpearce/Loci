@@ -14,7 +14,7 @@ class NotificationManager: NSObject, ObservableObject {
     @Published var isNotificationEnabled = false
     @Published var scheduledReminders: [SessionReminder] = []
     
-    private let notificationCenter = UNUserNotificationCenter.current()
+    let notificationCenter = UNUserNotificationCenter.current()
     private let userDefaults = UserDefaults.standard
     
     // Notification identifiers
@@ -195,6 +195,20 @@ class NotificationManager: NSObject, ObservableObject {
         
         let request = UNNotificationRequest(
             identifier: "\(sessionEndPrefix).\(session.id.uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        
+        notificationCenter.add(request)
+    }
+    func showImportSuccessNotification(trackCount: Int, location: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Import Successful! 🎵"
+        content.body = "\(trackCount) tracks shared to \(location)"
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: "import.success.\(UUID().uuidString)",
             content: content,
             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         )

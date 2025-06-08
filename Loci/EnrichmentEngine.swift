@@ -27,10 +27,10 @@ class EnrichmentEngine: ObservableObject {
     // MARK: - Public Interface
     
     /// Enrich a MediaPlayer-sourced event with Spotify metadata
-    func enrichEvent(_ event: PartialListeningEvent, completion: @escaping (ListeningEvent?) -> Void) {
+    func enrichEvent(_ event: PartialListeningEvent, sessionMode: SessionMode = .unknown, completion: @escaping (ListeningEvent?) -> Void) {
         // Check cache first
         if let cachedTrack = findCachedTrack(title: event.trackName, artist: event.artistName) {
-            let enrichedEvent = createEnrichedEvent(from: event, spotifyTrack: cachedTrack)
+            let enrichedEvent = createEnrichedEvent(from: event, spotifyTrack: cachedTrack, sessionMode: sessionMode)
             completion(enrichedEvent)
             return
         }
@@ -39,6 +39,7 @@ class EnrichmentEngine: ObservableObject {
         let enrichment = PendingEnrichment(
             id: event.id,
             event: event,
+            sessionMode: sessionMode,
             completion: completion,
             timestamp: Date()
         )
@@ -57,7 +58,8 @@ class EnrichmentEngine: ObservableObject {
     func reconcileSession(
         sessionStart: Date,
         sessionEnd: Date,
-        partialEvents: [PartialListeningEvent]
+        partialEvents: [PartialListeningEvent],
+        sessionMode: SessionMode = .onTheMove
     ) async -> [ListeningEvent] {
         
         // 1. Fetch Spotify's recently-played for the session timeframe
@@ -66,7 +68,8 @@ class EnrichmentEngine: ObservableObject {
         // 2. Match partial events with Spotify data
         let enrichedEvents = await matchEventsWithSpotify(
             partialEvents: partialEvents,
-            spotifyTracks: recentlyPlayed
+            spotifyTracks: recentlyPlayed,
+            sessionMode: sessionMode
         )
         
         // 3. For any unmatched events, try search API
@@ -74,7 +77,7 @@ class EnrichmentEngine: ObservableObject {
             !enrichedEvents.contains { $0.id == partial.id }
         }
         
-        let searchEnriched = await enrichViaSearch(unmatchedEvents)
+        let searchEnriched = await enrichViaSearch(unmatchedEvents, sessionMode: sessionMode)
         
         // 4. Combine all enriched events
         return enrichedEvents + searchEnriched
@@ -128,7 +131,8 @@ class EnrichmentEngine: ObservableObject {
                 // Create enriched event
                 let enrichedEvent = createEnrichedEvent(
                     from: enrichment.event,
-                    spotifyTrack: spotifyTrack
+                    spotifyTrack: spotifyTrack,
+                    sessionMode: enrichment.sessionMode
                 )
                 
                 // Call completion
@@ -137,7 +141,7 @@ class EnrichmentEngine: ObservableObject {
                 }
             } else {
                 // Couldn't enrich - return partial data as-is
-                let fallbackEvent = createFallbackEvent(from: enrichment.event)
+                let fallbackEvent = createFallbackEvent(from: enrichment.event, sessionMode: enrichment.sessionMode)
                 DispatchQueue.main.async {
                     enrichment.completion(fallbackEvent)
                 }
@@ -147,7 +151,7 @@ class EnrichmentEngine: ObservableObject {
     
     // MARK: - Spotify API Integration
     
-    private func fetchRecentlyPlayed(from startTime: Date, to endTime: Date) async -> [SpotifyRecentTrack] {
+    func fetchRecentlyPlayed(from startTime: Date, to endTime: Date) async -> [SpotifyRecentTrack] {
         // Spotify's recently-played endpoint has limitations:
         // - Max 50 items
         // - Only goes back ~3 hours
@@ -291,7 +295,8 @@ class EnrichmentEngine: ObservableObject {
     
     private func matchEventsWithSpotify(
         partialEvents: [PartialListeningEvent],
-        spotifyTracks: [SpotifyRecentTrack]
+        spotifyTracks: [SpotifyRecentTrack],
+        sessionMode: SessionMode
     ) async -> [ListeningEvent] {
         var enrichedEvents: [ListeningEvent] = []
         
@@ -306,7 +311,8 @@ class EnrichmentEngine: ObservableObject {
             if let match = bestMatch {
                 let enriched = createEnrichedEvent(
                     from: partial,
-                    spotifyTrack: match.track
+                    spotifyTrack: match.track,
+                    sessionMode: sessionMode
                 )
                 enrichedEvents.append(enriched)
                 
@@ -349,7 +355,7 @@ class EnrichmentEngine: ObservableObject {
         return matches.first?.candidate
     }
     
-    private func enrichViaSearch(_ events: [PartialListeningEvent]) async -> [ListeningEvent] {
+    private func enrichViaSearch(_ events: [PartialListeningEvent], sessionMode: SessionMode) async -> [ListeningEvent] {
         var enrichedEvents: [ListeningEvent] = []
         
         for event in events {
@@ -362,14 +368,14 @@ class EnrichmentEngine: ObservableObject {
             if let accessToken = try? await spotifyManager.getValidAccessToken(),
                let track = await searchSingleTrack(query: query, accessToken: accessToken) {
                 
-                let enriched = createEnrichedEvent(from: event, spotifyTrack: track)
+                let enriched = createEnrichedEvent(from: event, spotifyTrack: track, sessionMode: sessionMode)
                 enrichedEvents.append(enriched)
                 
                 // Cache for future
                 cacheManager.cacheSpotifyTrack(track)
             } else {
                 // Create fallback event
-                let fallback = createFallbackEvent(from: event)
+                let fallback = createFallbackEvent(from: event, sessionMode: sessionMode)
                 enrichedEvents.append(fallback)
             }
         }
@@ -390,7 +396,7 @@ class EnrichmentEngine: ObservableObject {
         return nil
     }
     
-    private func createEnrichedEvent(from partial: PartialListeningEvent, spotifyTrack: SpotifyTrack) -> ListeningEvent {
+    private func createEnrichedEvent(from partial: PartialListeningEvent, spotifyTrack: SpotifyTrack, sessionMode: SessionMode) -> ListeningEvent {
         return ListeningEvent(
             timestamp: partial.timestamp,
             latitude: partial.latitude,
@@ -400,11 +406,12 @@ class EnrichmentEngine: ObservableObject {
             artistName: spotifyTrack.artist,
             albumName: spotifyTrack.album,
             genre: spotifyTrack.genre,
-            spotifyTrackId: spotifyTrack.id
+            spotifyTrackId: spotifyTrack.id,
+            sessionMode: sessionMode
         )
     }
     
-    private func createFallbackEvent(from partial: PartialListeningEvent) -> ListeningEvent {
+    private func createFallbackEvent(from partial: PartialListeningEvent, sessionMode: SessionMode) -> ListeningEvent {
         return ListeningEvent(
             timestamp: partial.timestamp,
             latitude: partial.latitude,
@@ -414,7 +421,8 @@ class EnrichmentEngine: ObservableObject {
             artistName: partial.artistName,
             albumName: partial.albumName,
             genre: nil,
-            spotifyTrackId: "local:\(partial.id)"
+            spotifyTrackId: "local:\(partial.id)",
+            sessionMode: sessionMode
         )
     }
     
@@ -471,6 +479,7 @@ struct PartialListeningEvent {
 private struct PendingEnrichment {
     let id: UUID
     let event: PartialListeningEvent
+    let sessionMode: SessionMode
     let completion: (ListeningEvent?) -> Void
     let timestamp: Date
 }
@@ -481,10 +490,6 @@ private struct SearchQuery {
     let enrichmentId: UUID
 }
 
-private struct SpotifyRecentTrack {
-    let track: SpotifyTrack
-    let playedAt: Date
-}
 
 // MARK: - Spotify API Response Models
 
@@ -565,16 +570,8 @@ private struct SpotifyArtistResponse: Decodable {
     let genres: [String]
 }
 
-// MARK: - Extension for SpotifyManager
-
-extension SpotifyManager {
-    func getValidAccessToken() async throws -> String {
-        // This would need to be implemented in SpotifyManager
-        // For now, return the stored token
-        let tokenData = try KeychainHelper.read(service: "spotify", account: "accessToken")
-        guard let token = String(data: tokenData, encoding: .utf8) else {
-            throw URLError(.userAuthenticationRequired)
-        }
-        return token
-    }
+// Add around line 20 in EnrichmentEngine.swift
+struct SpotifyRecentTrack {
+    let track: SpotifyTrack
+    let playedAt: Date
 }

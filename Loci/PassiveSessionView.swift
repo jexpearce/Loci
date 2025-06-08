@@ -1064,37 +1064,6 @@ struct StartOnePlaceSessionButton: View {
 
 // MARK: - Supporting Types (Enhanced)
 
-struct SelectedLocation {
-    let coordinate: CLLocationCoordinate2D
-    let buildingInfo: BuildingInfo
-    let source: LocationSource
-    
-    enum LocationSource {
-        case current
-        case manual
-        case typed
-        case automatic  // For building change detection
-        
-        var icon: String {
-            switch self {
-            case .current: return "location.fill"
-            case .manual: return "map.fill"
-            case .typed: return "keyboard"
-            case .automatic: return "arrow.triangle.turn.up.right.circle.fill"
-            }
-        }
-        
-        var description: String {
-            switch self {
-            case .current: return "Current location"
-            case .manual: return "Selected on map"
-            case .typed: return "Manually entered"
-            case .automatic: return "Auto-detected"
-            }
-        }
-    }
-}
-
 struct LocationAnnotation: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
@@ -1149,10 +1118,4 @@ extension NotificationManager {
         
         notificationCenter.add(request)
     }
-}
-
-// MARK: - Notification Names Extension
-
-extension Notification.Name {
-    static let buildingChangeDetected = Notification.Name("com.loci.buildingChangeDetected")
 }

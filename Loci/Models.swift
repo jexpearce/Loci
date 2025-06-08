@@ -1,6 +1,6 @@
 import Foundation
 import SwiftData
-
+import MapKit
 // MARK: - Session Mode (Updated for simplified UX)
 
 enum SessionMode: String, CaseIterable, Codable, Identifiable {
@@ -630,4 +630,191 @@ enum TimeRange: String, Codable {
             return Date.distantPast
         }
     }
+}
+
+// MARK: - Supporting Types (Enhanced)
+
+struct SelectedLocationInfo {
+    let coordinate: CLLocationCoordinate2D
+    let buildingName: String
+}
+
+struct SelectedLocation {
+    let coordinate: CLLocationCoordinate2D
+    let buildingInfo: BuildingInfo
+    let source: LocationSource
+    
+    enum LocationSource {
+        case current
+        case manual
+        case typed
+        case automatic  // For building change detection
+        
+        var icon: String {
+            switch self {
+            case .current: return "location.fill"
+            case .manual: return "map.fill"
+            case .typed: return "keyboard"
+            case .automatic: return "arrow.triangle.turn.up.right.circle.fill"
+            }
+        }
+        
+        var description: String {
+            switch self {
+            case .current: return "Current location"
+            case .manual: return "Selected on map"
+            case .typed: return "Manually entered"
+            case .automatic: return "Auto-detected"
+            }
+        }
+    }
+}
+
+// MARK: - Import Batch Model (NEW)
+
+struct ImportBatch: Identifiable, Codable {
+    let id: UUID
+    let tracks: [SpotifyRecentTrack]
+    let location: String
+    let assignmentType: LocationAssignmentType
+    let importedAt: Date
+}
+
+enum LocationAssignmentType: String, Codable {
+    case region
+    case building
+}
+// MARK: - User Listening Data Models
+
+class UserListeningData {
+    let userId: String
+    let username: String
+    let profileImageURL: String?
+    var totalMinutes: Double
+    var totalSongs: Double
+    var artistMinutes: [String: Double]
+    var artistSongs: [String: Double]
+    var genreMinutes: [String: Double]
+    var genreSongs: [String: Double]
+    
+    init(userId: String, username: String, profileImageURL: String?,
+         totalMinutes: Double, totalSongs: Double,
+         artistMinutes: [String: Double], artistSongs: [String: Double],
+         genreMinutes: [String: Double], genreSongs: [String: Double]) {
+        self.userId = userId
+        self.username = username
+        self.profileImageURL = profileImageURL
+        self.totalMinutes = totalMinutes
+        self.totalSongs = totalSongs
+        self.artistMinutes = artistMinutes
+        self.artistSongs = artistSongs
+        self.genreMinutes = genreMinutes
+        self.genreSongs = genreSongs
+    }
+    
+    func addSession(_ session: Session) {
+        let sessionMinutes = Double(session.events.count) * 1.5 // Assume 90 seconds per track
+        totalMinutes += sessionMinutes
+        totalSongs += Double(session.events.count)
+        
+        // Add artist data
+        for event in session.events {
+            artistMinutes[event.artistName, default: 0] += 1.5
+            artistSongs[event.artistName, default: 0] += 1
+            
+            if let genre = event.genre {
+                genreMinutes[genre, default: 0] += 1.5
+                genreSongs[genre, default: 0] += 1
+            }
+        }
+    }
+    
+    func addImportBatch(_ batch: ImportBatch) {
+        let batchMinutes = Double(batch.tracks.count) * 3.0 // Assume 3 minutes per track
+        totalMinutes += batchMinutes
+        totalSongs += Double(batch.tracks.count)
+        
+        // Add artist data from imports
+        for track in batch.tracks {
+            artistMinutes[track.artist, default: 0] += 3.0
+            artistSongs[track.artist, default: 0] += 1
+            
+            // Note: ImportedTrack doesn't have genre, would need to enhance
+        }
+    }
+    
+    func getScore(for type: LeaderboardType, scoreType: ScoreType) -> Double {
+        switch type {
+        case .overall:
+            return scoreType == .minutes ? totalMinutes : totalSongs
+            
+        case .artist(let artistName):
+            return scoreType == .minutes ?
+                artistMinutes[artistName, default: 0] :
+                artistSongs[artistName, default: 0]
+                
+        case .genre(let genreName):
+            return scoreType == .minutes ?
+                genreMinutes[genreName, default: 0] :
+                genreSongs[genreName, default: 0]
+        }
+    }
+}
+// MARK: - UI Models for Import (Different from EnrichmentEngine internals)
+
+struct SpotifyImportTrack: Identifiable, Codable {
+    let id: String
+    let name: String
+    let artist: String
+    let album: String
+    let playedAt: Date
+    let imageURL: String?
+}
+
+enum SpotifyError: Error {
+    case notAuthenticated
+    case invalidResponse
+    case networkError
+}
+
+// MARK: - Import Batch Entity for SwiftData
+
+@Model
+class ImportBatchEntity {
+    @Attribute(.unique) var id: UUID
+    var tracksData: Data // JSON encoded SpotifyRecentTrack array
+    var location: String
+    var assignmentTypeRaw: String
+    var importedAt: Date
+    
+    init(id: UUID, tracksData: Data, location: String, assignmentType: LocationAssignmentType, importedAt: Date) {
+        self.id = id
+        self.tracksData = tracksData
+        self.location = location
+        self.assignmentTypeRaw = assignmentType.rawValue
+        self.importedAt = importedAt
+    }
+    
+    var assignmentType: LocationAssignmentType {
+        LocationAssignmentType(rawValue: assignmentTypeRaw) ?? .region
+    }
+    
+    var tracks: [SpotifyRecentTrack] {
+        (try? JSONDecoder().decode([SpotifyRecentTrack].self, from: tracksData)) ?? []
+    }
+    
+    static func from(_ batch: ImportBatch) -> ImportBatchEntity {
+        let tracksData = (try? JSONEncoder().encode(batch.tracks)) ?? Data()
+        return ImportBatchEntity(
+            id: batch.id,
+            tracksData: tracksData,
+            location: batch.location,
+            assignmentType: batch.assignmentType,
+            importedAt: batch.importedAt
+        )
+    }
+}
+
+extension Notification.Name {
+    static let leaderboardDataUpdated = Notification.Name("leaderboardDataUpdated")
 }

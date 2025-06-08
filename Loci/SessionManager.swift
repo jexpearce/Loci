@@ -20,6 +20,7 @@ class SessionManager: ObservableObject {
     private let spotifyManager = SpotifyManager.shared
     private let dataStore = DataStore.shared
     private let reverseGeocoding = ReverseGeocoding.shared
+    private let enrichmentEngine = EnrichmentEngine.shared
     
     // Session management
     private var locationUpdateTimer: Timer?
@@ -185,17 +186,38 @@ class SessionManager: ObservableObject {
         
         guard let startTime = sessionStartTime else { return }
         
-        // Reconcile with Spotify data
-        spotifyManager.reconcilePartialEvents(within: startTime, end: endTime) { [weak self] enrichedEvents in
-            guard let self = self else { return }
-            
-            self.dataStore.saveSession(
-                startTime: startTime,
-                endTime: endTime,
-                duration: self.calculateSessionDuration(start: startTime, end: endTime),
-                mode: .onTheMove,
-                events: enrichedEvents
+        // Convert current session events to partial events for enrichment
+        let partialEvents = dataStore.currentSessionEvents.map { event in
+            PartialListeningEvent(
+                id: event.id,
+                timestamp: event.timestamp,
+                latitude: event.latitude,
+                longitude: event.longitude,
+                buildingName: event.buildingName,
+                trackName: event.trackName,
+                artistName: event.artistName,
+                albumName: event.albumName
             )
+        }
+        
+        // Reconcile with Spotify data using EnrichmentEngine
+        Task {
+            let enrichedEvents = await enrichmentEngine.reconcileSession(
+                sessionStart: startTime,
+                sessionEnd: endTime,
+                partialEvents: partialEvents,
+                sessionMode: .onTheMove
+            )
+            
+            await MainActor.run {
+                self.dataStore.saveSession(
+                    startTime: startTime,
+                    endTime: endTime,
+                    duration: self.calculateSessionDuration(start: startTime, end: endTime),
+                    mode: .onTheMove,
+                    events: enrichedEvents
+                )
+            }
         }
         
         print("🏁 Stopped On-the-Move session")

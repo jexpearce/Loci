@@ -1,5 +1,354 @@
 import SwiftUI
+import MapKit
 import CoreLocation
+
+// MARK: - Enhanced Spotify Import View (NEW)
+
+struct EnhancedSpotifyImportView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var isLoading = false
+    @State private var recentTracks: [SpotifyImportTrack] = []
+    @State private var selectedTracks: Set<String> = []
+    @State private var selectedLocation: String?
+    @State private var assignmentType: LocationAssignmentType = .region
+    @State private var errorMessage: String?
+    @State private var showingLocationPicker = false
+    @State private var importStep: ImportStep = .loading
+    
+    enum ImportStep {
+        case loading
+        case trackSelection
+        case locationAssignment
+        case confirmation
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LociTheme.Colors.appBackground
+                    .ignoresSafeArea()
+                
+                switch importStep {
+                case .loading:
+                    LoadingImportView()
+                case .trackSelection:
+                    TrackSelectionView()
+                case .locationAssignment:
+                    LocationAssignmentView()
+                case .confirmation:
+                    ImportConfirmationView()
+                }
+            }
+            .navigationTitle("Import Recent Plays")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                if importStep == .trackSelection {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Next") {
+                            withAnimation { importStep = .locationAssignment }
+                        }
+                        .disabled(selectedTracks.isEmpty)
+                        .foregroundColor(selectedTracks.isEmpty ? LociTheme.Colors.disabledState : LociTheme.Colors.secondaryHighlight)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            loadRecentTracks()
+        }
+    }
+    
+    // MARK: - Loading View
+    
+    @ViewBuilder
+    func LoadingImportView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
+                .scaleEffect(1.5)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Fetching Your Recent Plays")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Getting your last 50 tracks from Spotify")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+        }
+    }
+    
+    // MARK: - Track Selection View
+    
+    @ViewBuilder
+    func TrackSelectionView() -> some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Header
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Select Tracks to Share")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                HStack {
+                    Button(selectedTracks.count == recentTracks.count ? "Deselect All" : "Select All") {
+                        if selectedTracks.count == recentTracks.count {
+                            selectedTracks.removeAll()
+                        } else {
+                            selectedTracks = Set(recentTracks.map { $0.id })
+                        }
+                    }
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    
+                    Spacer()
+                    
+                    Text("\(selectedTracks.count) of \(recentTracks.count) selected")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Track List
+            List(recentTracks, id: \.id) { track in
+                SelectableTrackRow(
+                    track: track,
+                    isSelected: selectedTracks.contains(track.id)
+                ) {
+                    if selectedTracks.contains(track.id) {
+                        selectedTracks.remove(track.id)
+                    } else {
+                        selectedTracks.insert(track.id)
+                    }
+                }
+                .listRowBackground(LociTheme.Colors.contentContainer)
+            }
+            .listStyle(PlainListStyle())
+        }
+    }
+    
+    // MARK: - Location Assignment View
+    
+    @ViewBuilder
+    func LocationAssignmentView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Header
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Where to Share?")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Choose where to share your \(selectedTracks.count) tracks")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            // Assignment Type Selector
+            VStack(spacing: LociTheme.Spacing.medium) {
+                LocationTypeSelector(selectedType: $assignmentType)
+                
+                // Current location display or picker
+                if let location = selectedLocation {
+                    SelectedLocationDisplay(
+                        locationName: location,
+                        type: assignmentType
+                    ) {
+                        selectedLocation = nil
+                    }
+                } else {
+                    LocationPickerButtons(
+                        assignmentType: assignmentType,
+                        onCurrentLocation: getCurrentLocation,
+                        onManualSelect: { showingLocationPicker = true }
+                    )
+                }
+            }
+            .padding(LociTheme.Spacing.medium)
+            .lociCard()
+            
+            // Continue Button
+            if selectedLocation != nil {
+                Button("Continue") {
+                    withAnimation { importStep = .confirmation }
+                }
+                .lociButton(.primary, isFullWidth: true)
+            }
+        }
+        .sheet(isPresented: $showingLocationPicker) {
+            // REUSE your existing LocationSelectionView from SpotifyImportView.swift
+            LocationSelectionView(
+                selectedLocation: $selectedLocation,
+                selectedLocationInfo: .constant(nil)
+            )
+        }
+    }
+    
+    // MARK: - Confirmation View
+    
+    @ViewBuilder
+    func ImportConfirmationView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Success Header
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                Text("Ready to Share!")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+            }
+            
+            // Summary
+            VStack(spacing: LociTheme.Spacing.medium) {
+                ImportSummaryCard(
+                    trackCount: selectedTracks.count,
+                    location: selectedLocation ?? "Unknown",
+                    assignmentType: assignmentType
+                )
+                
+                // Final confirmation
+                Button("Share My Music") {
+                    processImport()
+                }
+                .lociButton(.gradient, isFullWidth: true)
+                
+                Button("Back to Edit") {
+                    withAnimation { importStep = .locationAssignment }
+                }
+                .lociButton(.secondary, isFullWidth: true)
+            }
+        }
+    }
+    
+    private func loadRecentTracks() {
+        isLoading = true
+        
+        Task {
+            do {
+                // Call your fixed Spotify import method here
+                let tracks = try await spotifyManager.fetchRecentlyPlayedTracks(limit: 50)
+                
+                await MainActor.run {
+                    self.recentTracks = tracks
+                    self.selectedTracks = Set(tracks.map { $0.id }) // Select all by default
+                    self.importStep = .trackSelection
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func getCurrentLocation() {
+        // Use your existing LocationManager
+        locationManager.requestOneTimeLocation { location in
+            guard let location = location else { return }
+            
+            Task {
+                // Use your existing ReverseGeocoding service
+                let buildingInfo = await ReverseGeocoding.shared.reverseGeocodeAsync(location: location)
+                
+                DispatchQueue.main.async {
+                    if self.assignmentType == .region {
+                        // For region: use city/area from buildingInfo
+                        self.selectedLocation = buildingInfo?.city ?? buildingInfo?.neighborhood ?? "Your Area"
+                    } else {
+                        // For building: use specific building name
+                        self.selectedLocation = buildingInfo?.name ?? "Current Location"
+                    }
+                }
+            }
+        }
+    }
+    
+    private func processImport() {
+        guard let location = selectedLocation else { return }
+        
+        // Filter selected tracks
+        let tracksToImport = recentTracks.filter { selectedTracks.contains($0.id) }
+        
+        // Create import batch
+        let importBatch = ImportBatch(
+            id: UUID(),
+            tracks: tracksToImport,
+            location: location,
+            assignmentType: assignmentType,
+            importedAt: Date()
+        )
+        
+        // Save to data store (triggers leaderboard update)
+        dataStore.saveImportBatch(importBatch)
+        
+        // Update SpotifyManager
+        spotifyManager.hasRecentImports = true
+        
+        // Show success feedback
+        NotificationManager.shared.showImportSuccessNotification(
+            trackCount: tracksToImport.count,
+            location: location
+        )
+        
+        dismiss()
+    }
+}
+
+// MARK: - Selectable Track Row
+
+struct SelectableTrackRow: View {
+    let track: SpotifyImportTrack
+    let isSelected: Bool
+    let onToggle: () -> Void
+    
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: LociTheme.Spacing.medium) {
+                // Selection indicator
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState)
+                
+                // Track info
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                    Text(track.name)
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .lineLimit(1)
+                    
+                    Text(track.artist)
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                // Played time
+                Text(track.playedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            .padding(.vertical, LociTheme.Spacing.xSmall)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Original Spotify Import View
 
 struct SpotifyImportView: View {
     @Environment(\.dismiss) var dismiss
@@ -553,13 +902,15 @@ struct LocationAssignmentCard: View {
             }
             
             Task {
-                let buildingName = await self.reverseGeocoding.reverseGeocodeAsync(location: location)?.name
+                let buildingInfo = await self.reverseGeocoding.reverseGeocodeAsync(location: location)
                 
                 DispatchQueue.main.async {
-                    if let buildingName = buildingName {
-                        self.selectedLocation = buildingName
+                    if let buildingInfo = buildingInfo {
+                        self.selectedLocation = buildingInfo.name
                     } else {
-                        self.locationError = "Could not determine building name"
+                        // Fallback to coordinate-based location
+                        let fallbackName = "Location \(String(format: "%.4f, %.4f", location.coordinate.latitude, location.coordinate.longitude))"
+                        self.selectedLocation = fallbackName
                     }
                     self.isLoadingCurrentLocation = false
                 }
@@ -1208,11 +1559,6 @@ struct SelectedPlaylistDisplay: View {
 
 // MARK: - Supporting Types
 
-struct SelectedLocationInfo {
-    let coordinate: CLLocationCoordinate2D
-    let buildingName: String
-}
-
 enum ImportError: Error, LocalizedError {
     case noPlaylistSelected
     case spotifyNotConnected
@@ -1246,5 +1592,222 @@ extension NotificationManager {
         )
         
         notificationCenter.add(request)
+    }
+}
+
+// MARK: - Supporting Views for Location Assignment
+
+struct LocationTypeSelector: View {
+    @Binding var selectedType: LocationAssignmentType
+    
+    var body: some View {
+        HStack(spacing: 0) {
+            LocationTypeButton(
+                title: "Region",
+                subtitle: "Share with your area",
+                icon: "map.fill",
+                isSelected: selectedType == .region
+            ) {
+                selectedType = .region
+            }
+            
+            LocationTypeButton(
+                title: "Building",
+                subtitle: "Share with specific place",
+                icon: "building.2.fill",
+                isSelected: selectedType == .building
+            ) {
+                selectedType = .building
+            }
+        }
+        .background(LociTheme.Colors.disabledState)
+        .cornerRadius(LociTheme.CornerRadius.medium)
+    }
+}
+
+struct LocationTypeButton: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: LociTheme.Spacing.xSmall) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? .white : LociTheme.Colors.subheadText)
+                
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(isSelected ? .white : LociTheme.Colors.mainText)
+                
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(isSelected ? .white.opacity(0.8) : LociTheme.Colors.subheadText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, LociTheme.Spacing.medium)
+            .background(isSelected ? LociTheme.Colors.primaryAction : Color.clear)
+            .cornerRadius(LociTheme.CornerRadius.small)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct SelectedLocationDisplay: View {
+    let locationName: String
+    let type: LocationAssignmentType
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack {
+            Image(systemName: type == .region ? "map.fill" : "building.2.fill")
+                .font(.system(size: 18))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Selected \(type == .region ? "Region" : "Building")")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Text(locationName)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .fontWeight(.medium)
+            }
+            
+            Spacer()
+            
+            Button("Change") {
+                onRemove()
+            }
+            .font(.system(size: 14))
+            .foregroundColor(LociTheme.Colors.primaryAction)
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.small)
+    }
+}
+
+struct LocationPickerButtons: View {
+    let assignmentType: LocationAssignmentType
+    let onCurrentLocation: () -> Void
+    let onManualSelect: () -> Void
+    @EnvironmentObject var locationManager: LocationManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            Button(action: onCurrentLocation) {
+                HStack {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Use Current Location")
+                            .font(LociTheme.Typography.body)
+                            .foregroundColor(LociTheme.Colors.mainText)
+                        
+                        Text(assignmentType == .region ? "Auto-detect your region" : "Find nearest building")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                .padding(LociTheme.Spacing.medium)
+                .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+                .cornerRadius(LociTheme.CornerRadius.small)
+            }
+            .disabled(locationManager.authorizationStatus != .authorizedAlways && 
+                     locationManager.authorizationStatus != .authorizedWhenInUse)
+            
+            Button(action: onManualSelect) {
+                HStack {
+                    Image(systemName: "map")
+                        .font(.system(size: 18))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Select on Map")
+                            .font(LociTheme.Typography.body)
+                            .foregroundColor(LociTheme.Colors.mainText)
+                        
+                        Text("Choose manually like Hinge")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                .padding(LociTheme.Spacing.medium)
+                .background(LociTheme.Colors.disabledState.opacity(0.3))
+                .cornerRadius(LociTheme.CornerRadius.small)
+            }
+        }
+    }
+}
+
+struct ImportSummaryCard: View {
+    let trackCount: Int
+    let location: String
+    let assignmentType: LocationAssignmentType
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Import Summary")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                Spacer()
+            }
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                SummaryRow(icon: "music.note", label: "Tracks", value: "\(trackCount)")
+                SummaryRow(icon: assignmentType == .region ? "map.fill" : "building.2.fill", 
+                          label: assignmentType == .region ? "Region" : "Building", 
+                          value: location)
+                SummaryRow(icon: "clock", label: "Time", value: "Now")
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
+struct SummaryRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(LociTheme.Colors.primaryAction)
+                .frame(width: 24)
+            
+            Text(label)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Spacer()
+            
+            Text(value)
+                .font(LociTheme.Typography.body)
+                .foregroundColor(LociTheme.Colors.mainText)
+                .fontWeight(.medium)
+        }
     }
 }

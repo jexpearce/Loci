@@ -270,6 +270,146 @@ class DataStore: ObservableObject {
             .prefix(limit)
             .map { (building: $0.key, visitCount: $0.value) }
     }
+    // MARK: - Leaderboard Data Integration
+
+    func getLeaderboardData(scope: LocationScope, type: LeaderboardType, context: LocationContext) -> [UserListeningData] {
+        switch scope {
+        case .building:
+            return getBuildingLeaderboardData(buildingName: context.building, type: type)
+        case .region:
+            return getRegionalLeaderboardData(region: context.region, type: type)
+        case .state, .country, .global:
+            return getGlobalLeaderboardData(type: type) // Would filter by state/country in production
+        }
+    }
+
+    private func getBuildingLeaderboardData(buildingName: String?, type: LeaderboardType) -> [UserListeningData] {
+        guard let building = buildingName else { return [] }
+        
+        // Get all sessions for this building
+        let buildingSessions = sessionHistory.filter { session in
+            session.events.contains { $0.buildingName == building }
+        }
+        
+        // Get all import batches for this building
+        let buildingImports = importBatches.filter { $0.location == building && $0.assignmentType == .building }
+        
+        return aggregateUserData(sessions: buildingSessions, imports: buildingImports, type: type)
+    }
+
+    private func getRegionalLeaderboardData(region: String?, type: LeaderboardType) -> [UserListeningData] {
+        // For now, use all sessions as regional data
+        // In production, you'd filter by actual geographic region
+        let regionalSessions = sessionHistory
+        let regionalImports = importBatches.filter { $0.assignmentType == .region }
+        
+        return aggregateUserData(sessions: regionalSessions, imports: regionalImports, type: type)
+    }
+
+    private func getGlobalLeaderboardData(type: LeaderboardType) -> [UserListeningData] {
+        // Use all available data
+        return aggregateUserData(sessions: sessionHistory, imports: importBatches, type: type)
+    }
+
+    private func aggregateUserData(sessions: [Session], imports: [ImportBatch], type: LeaderboardType) -> [UserListeningData] {
+        var userDataMap: [String: UserListeningData] = [:]
+        
+        // Process sessions
+        for session in sessions {
+            let userId = "current-user" // In production, get from session.userId
+            let username = "You" // In production, get from user profile
+            
+            if userDataMap[userId] == nil {
+                userDataMap[userId] = UserListeningData(
+                    userId: userId,
+                    username: username,
+                    profileImageURL: nil,
+                    totalMinutes: 0,
+                    totalSongs: 0,
+                    artistMinutes: [:],
+                    artistSongs: [:],
+                    genreMinutes: [:],
+                    genreSongs: [:]
+                )
+            }
+            
+            // Add session data
+            userDataMap[userId]?.addSession(session)
+        }
+        
+        // Process imports
+        for importBatch in imports {
+            let userId = "current-user" // In production, get from import.userId
+            let username = "You"
+            
+            if userDataMap[userId] == nil {
+                userDataMap[userId] = UserListeningData(
+                    userId: userId,
+                    username: username,
+                    profileImageURL: nil,
+                    totalMinutes: 0,
+                    totalSongs: 0,
+                    artistMinutes: [:],
+                    artistSongs: [:],
+                    genreMinutes: [:],
+                    genreSongs: [:]
+                )
+            }
+            
+            // Add import data
+            userDataMap[userId]?.addImportBatch(importBatch)
+        }
+        
+        // Add demo users for testing
+        addDemoUsers(to: &userDataMap, basedOn: userDataMap["current-user"])
+        
+        return Array(userDataMap.values)
+    }
+
+    // MARK: - Import Batch Storage
+
+    @Published var importBatches: [ImportBatch] = []
+
+    func saveImportBatch(_ batch: ImportBatch) {
+        importBatches.append(batch)
+        
+        // Save to persistent storage
+        container.mainContext.insert(ImportBatchEntity.from(batch))
+        try? container.mainContext.save()
+        
+        // Trigger leaderboard refresh
+        NotificationCenter.default.post(name: .leaderboardDataUpdated, object: batch)
+        
+        print("✅ Saved import batch: \(batch.tracks.count) tracks to \(batch.location)")
+    }
+
+    private func addDemoUsers(to userDataMap: inout [String: UserListeningData], basedOn currentUser: UserListeningData?) {
+        let demoUsers = [
+            ("demo-user-1", "Alex Chen", 1.2),
+            ("demo-user-2", "Jordan Smith", 0.8),
+            ("demo-user-3", "Taylor Kim", 1.5),
+            ("demo-user-4", "Casey Wong", 0.6),
+            ("demo-user-5", "Sam Rivera", 2.0)
+        ]
+        
+        guard let currentUserData = currentUser else { return }
+        
+        for (userId, username, multiplier) in demoUsers {
+            let demoData = UserListeningData(
+                userId: userId,
+                username: username,
+                profileImageURL: nil,
+                totalMinutes: currentUserData.totalMinutes * multiplier,
+                totalSongs: currentUserData.totalSongs * multiplier,
+                artistMinutes: currentUserData.artistMinutes.mapValues { $0 * multiplier },
+                artistSongs: currentUserData.artistSongs.mapValues { $0 * multiplier },
+                genreMinutes: currentUserData.genreMinutes.mapValues { $0 * multiplier },
+                genreSongs: currentUserData.genreSongs.mapValues { $0 * multiplier }
+            )
+            
+            userDataMap[userId] = demoData
+        }
+    }
 
     // MARK: - Data Management
 

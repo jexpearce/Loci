@@ -38,8 +38,11 @@ struct ContentView: View {
                             // Show active session (mode-specific)
                             ActiveSessionView()
                         } else {
-                            // Show NEW simplified mode selection
-                            NewSessionModeSelectionView()
+                            // NEW: Primary Spotify Import Flow
+                            SpotifyImportMainView()
+                            
+                            // MOVED: Session modes now secondary
+                            AdvancedSessionOptionsView()
                         }
                         
                         // Status Section (keep existing)
@@ -51,7 +54,8 @@ struct ContentView: View {
                         }
                         
                         // Social Activity (keep existing)
-                        SocialActivitySection()
+                        // Leaderboards (NEW - replaces regional discovery)
+                        LeaderboardPreviewSection()
                     }
                     .padding(.horizontal, LociTheme.Spacing.medium)
                     .padding(.bottom, LociTheme.Spacing.xxLarge)
@@ -70,6 +74,9 @@ struct ContentView: View {
         .sheet(isPresented: $showingSpotifyImport) {
             SpotifyImportView()
                 .environmentObject(spotifyManager)
+                .environmentObject(locationManager)
+                .environmentObject(dataStore)
+                .environmentObject(ReverseGeocoding.shared)
         }
         .alert("Location Changed", isPresented: $showingLocationChangeAlert) {
             Button("Got it") {
@@ -870,6 +877,9 @@ struct SessionModeCoordinator: View {
         .sheet(isPresented: $showingSpotifyImport) {
             SpotifyImportView()
                 .environmentObject(spotifyManager)
+                .environmentObject(locationManager)
+                .environmentObject(dataStore)
+                .environmentObject(ReverseGeocoding.shared)
         }
         .sheet(isPresented: .constant(!hasShownWelcome)) {
             ModeWelcomeSheet(hasShownWelcome: $hasShownWelcome)
@@ -1341,6 +1351,7 @@ struct NewSessionModeSelectionView: View {
     @State private var selectedDuration: SessionDuration = .twoHours
     @State private var showingLocationPicker = false
     @State private var selectedLocation: String?
+    @State private var selectedLocationInfo: SelectedLocationInfo?
     
     var body: some View {
         VStack(spacing: LociTheme.Spacing.large) {
@@ -1376,7 +1387,10 @@ struct NewSessionModeSelectionView: View {
             )
         }
         .sheet(isPresented: $showingLocationPicker) {
-            LocationSelectionView(selectedLocation: $selectedLocation)
+            LocationSelectionView(
+                selectedLocation: $selectedLocation,
+                selectedLocationInfo: $selectedLocationInfo
+            )
         }
     }
     
@@ -2237,5 +2251,492 @@ struct LocationBreakdownRow: View {
                 .foregroundColor(LociTheme.Colors.primaryAction)
         }
         .padding(.vertical, LociTheme.Spacing.xSmall)
+    }
+}
+
+// MARK: - Spotify Import Main View (NEW PRIMARY FEATURE)
+
+struct SpotifyImportMainView: View {
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var locationManager: LocationManager
+    @State private var showingImportSheet = false
+    @State private var currentRegion: String = "Your Area"
+    @State private var currentBuilding: String?
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Hero Import Section
+            SpotifyImportHeroCard(
+                region: currentRegion,
+                building: currentBuilding,
+                showingImportSheet: $showingImportSheet
+            )
+            
+            // Quick Stats / Recent Activity Preview
+            if spotifyManager.hasRecentImports {
+                RecentImportPreviewCard()
+            }
+            
+            // Regional Discovery Teaser
+            RegionalDiscoveryTeaser(region: currentRegion)
+        }
+    }
+}
+
+// MARK: - Spotify Import Hero Card
+
+struct SpotifyImportHeroCard: View {
+    let region: String
+    let building: String?
+    @Binding var showingImportSheet: Bool
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Catchy Header
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Image(systemName: "music.note.house.fill")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    .glow(color: LociTheme.Colors.secondaryHighlight, radius: 12)
+                
+                VStack(spacing: LociTheme.Spacing.small) {
+                    Text("Share Your Sound")
+                        .font(LociTheme.Typography.heading)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Text("Let **\(region)** know what you've been listening to")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            
+            // Import Button
+            Button(action: { 
+                if spotifyManager.isAuthenticated {
+                    showingImportSheet = true
+                } else {
+                    spotifyManager.startAuthorization()
+                }
+            }) {
+                HStack(spacing: LociTheme.Spacing.medium) {
+                    Image(systemName: "square.and.arrow.down.on.square.fill")
+                        .font(.system(size: 24))
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Import Recent Plays")
+                            .font(.system(size: 18, weight: .semibold))
+                        
+                        Text("Your last 50 tracks from Spotify")
+                            .font(.system(size: 14))
+                            .opacity(0.8)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(LociTheme.Spacing.large)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(
+                            LinearGradient(
+                                colors: [LociTheme.Colors.secondaryHighlight, LociTheme.Colors.primaryAction],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: LociTheme.Colors.secondaryHighlight.opacity(0.3), radius: 10, x: 0, y: 5)
+                )
+            }
+            .disabled(!spotifyManager.isAuthenticated && spotifyManager.isLoading)
+            
+            // Status indicator
+            if !spotifyManager.isAuthenticated {
+                HStack(spacing: LociTheme.Spacing.small) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                    
+                    Text("Connect Spotify to start sharing")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.large)
+        .lociCard()
+        .sheet(isPresented: $showingImportSheet) {
+            EnhancedSpotifyImportView()
+        }
+    }
+}
+
+// MARK: - Recent Import Preview (REAL IMPLEMENTATION)
+
+struct RecentImportPreviewCard: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Your Recent Shares")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                Button("View All") {
+                    // TODO: Navigate to full import history
+                }
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+            
+            if let recentImport = dataStore.importBatches.last {
+                RecentImportRow(importBatch: recentImport)
+            } else {
+                EmptyImportPreview()
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+}
+
+struct RecentImportRow: View {
+    let importBatch: ImportBatch
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            // Import icon
+            ZStack {
+                Circle()
+                    .fill(LociTheme.Colors.secondaryHighlight.opacity(0.2))
+                    .frame(width: 40, height: 40)
+                
+                Image(systemName: "square.and.arrow.down.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+            
+            // Import details
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                HStack {
+                    Text("\(importBatch.tracks.count) tracks")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Text("•")
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                    
+                    Text(timeAgo(from: importBatch.importedAt))
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                HStack(spacing: LociTheme.Spacing.xSmall) {
+                    Image(systemName: importBatch.assignmentType == .building ? "building.2" : "map")
+                        .font(.system(size: 12))
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                    
+                    Text(importBatch.location)
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                        .lineLimit(1)
+                }
+                
+                // Show first few track names
+                if !importBatch.tracks.isEmpty {
+                    let previewTracks = Array(importBatch.tracks.prefix(2))
+                    let trackNames = previewTracks.map { $0.name }.joined(separator: ", ")
+                    let moreText = importBatch.tracks.count > 2 ? " +\(importBatch.tracks.count - 2) more" : ""
+                    
+                    Text(trackNames + moreText)
+                        .font(.system(size: 12))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .lineLimit(2)
+                }
+            }
+            
+            Spacer()
+            
+            // Arrow
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.subheadText)
+        }
+    }
+    
+    private func timeAgo(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        
+        if interval < 60 {
+            return "Just now"
+        } else if interval < 3600 {
+            let minutes = Int(interval / 60)
+            return "\(minutes)m ago"
+        } else if interval < 86400 {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        } else {
+            let days = Int(interval / 86400)
+            return "\(days)d ago"
+        }
+    }
+}
+
+struct EmptyImportPreview: View {
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 16))
+                .foregroundColor(LociTheme.Colors.subheadText.opacity(0.7))
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text("No imports yet")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                Text("Import your recent Spotify plays to get started")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText.opacity(0.8))
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, LociTheme.Spacing.small)
+    }
+}
+// MARK: - Regional Discovery Teaser (REAL IMPLEMENTATION)
+
+struct RegionalDiscoveryTeaser: View {
+    let region: String
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                
+                Text("Discover \(region)")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+            }
+            
+            // Show actual trending track from recent data
+            if let trendingTrack = getMostPlayedTrack() {
+                VStack(spacing: LociTheme.Spacing.small) {
+                    HStack {
+                        Text("🎵 Trending in your area:")
+                            .font(.system(size: 14))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        
+                        Spacer()
+                    }
+                    
+                    HStack {
+                        Text("\(trendingTrack.name) • \(trendingTrack.artist)")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(LociTheme.Colors.mainText)
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        Text("\(trendingTrack.playCount) plays")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                    }
+                }
+            } else {
+                HStack {
+                    Text("🎵 No trending data yet")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+    }
+    
+    private func getMostPlayedTrack() -> (name: String, artist: String, playCount: Int)? {
+        // Aggregate tracks from all sessions and imports
+        var trackCounts: [String: (artist: String, count: Int)] = [:]
+        
+        // Count from sessions
+        for session in dataStore.sessionHistory {
+            for event in session.events {
+                let key = "\(event.trackName)|\(event.artistName)"
+                if let existing = trackCounts[key] {
+                    trackCounts[key] = (artist: existing.artist, count: existing.count + 1)
+                } else {
+                    trackCounts[key] = (artist: event.artistName, count: 1)
+                }
+            }
+        }
+        
+        // Count from imports
+        for importBatch in dataStore.importBatches {
+            for track in importBatch.tracks {
+                let key = "\(track.name)|\(track.artist)"
+                if let existing = trackCounts[key] {
+                    trackCounts[key] = (artist: existing.artist, count: existing.count + 1)
+                } else {
+                    trackCounts[key] = (artist: track.artist, count: 1)
+                }
+            }
+        }
+        
+        // Find most played
+        guard let mostPlayed = trackCounts.max(by: { $0.value.count < $1.value.count }) else {
+            return nil
+        }
+        
+        let trackName = String(mostPlayed.key.split(separator: "|").first ?? "")
+        return (
+            name: trackName,
+            artist: mostPlayed.value.artist,
+            playCount: mostPlayed.value.count
+        )
+    }
+}
+
+// MARK: - Advanced Session Options (MOVED DOWN - Secondary Feature)
+
+struct AdvancedSessionOptionsView: View {
+    @State private var showingAdvancedOptions = false
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            Button(action: { 
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showingAdvancedOptions.toggle()
+                }
+            }) {
+                HStack {
+                    Text("Advanced Session Modes")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Spacer()
+                    
+                    Image(systemName: showingAdvancedOptions ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                .padding(LociTheme.Spacing.medium)
+                .background(LociTheme.Colors.contentContainer.opacity(0.5))
+                .cornerRadius(LociTheme.CornerRadius.medium)
+            }
+            
+            if showingAdvancedOptions {
+                // KEEP your existing NewSessionModeSelectionView here
+                NewSessionModeSelectionView()
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .move(edge: .bottom).combined(with: .opacity)
+                    ))
+            }
+        }
+    }
+}
+// MARK: - Leaderboard Preview Section
+
+struct LeaderboardPreviewSection: View {
+    @StateObject private var leaderboardManager = LeaderboardManager.shared
+    @State private var showingFullLeaderboards = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Your Rankings")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                Button("View All") {
+                    showingFullLeaderboards = true
+                }
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+            
+            if let bestRanking = leaderboardManager.getBestUserRanking() {
+                LeaderboardPreviewCard(ranking: bestRanking)
+            } else {
+                EmptyLeaderboardPreview()
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+        .sheet(isPresented: $showingFullLeaderboards) {
+            LeaderboardView()
+        }
+        .onAppear {
+            Task {
+                await leaderboardManager.loadLeaderboards()
+            }
+        }
+    }
+}
+
+struct LeaderboardPreviewCard: View {
+    let ranking: BestRanking
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            ZStack {
+                Circle()
+                    .fill(LociTheme.Colors.secondaryHighlight)
+                    .frame(width: 40, height: 40)
+                
+                Text("#\(ranking.rank)")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(LociTheme.Colors.appBackground)
+            }
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text(ranking.displayText)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("out of \(ranking.totalParticipants) listeners")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.subheadText)
+        }
+    }
+}
+
+struct EmptyLeaderboardPreview: View {
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.small) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 16))
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Text("Start listening to see your rankings")
+                .font(.system(size: 14))
+                .foregroundColor(LociTheme.Colors.subheadText)
+            
+            Spacer()
+        }
     }
 }
