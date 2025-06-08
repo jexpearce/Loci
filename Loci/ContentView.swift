@@ -1,4 +1,6 @@
 import SwiftUI
+import MapKit
+import CoreLocation
 
 struct ContentView: View {
     @EnvironmentObject var sessionManager: SessionManager
@@ -38,6 +40,9 @@ struct ContentView: View {
                             // Show active session (mode-specific)
                             ActiveSessionView()
                         } else {
+                            // Location Selection Section
+                            LocationSelectionSection()
+                            
                             // NEW: Primary Spotify Import Flow
                             SpotifyImportMainView()
                             
@@ -2290,6 +2295,11 @@ struct SpotifyImportHeroCard: View {
     let building: String?
     @Binding var showingImportSheet: Bool
     @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var dataStore: DataStore
+    
+    private var locationDisplayText: String {
+        dataStore.designatedLocation?.displayName ?? region
+    }
     
     var body: some View {
         VStack(spacing: LociTheme.Spacing.large) {
@@ -2305,7 +2315,7 @@ struct SpotifyImportHeroCard: View {
                         .font(LociTheme.Typography.heading)
                         .foregroundColor(LociTheme.Colors.mainText)
                     
-                    Text("Let **\(region)** know what you've been listening to")
+                    Text("Let **\(locationDisplayText)** know what you've been listening to")
                         .font(LociTheme.Typography.body)
                         .foregroundColor(LociTheme.Colors.subheadText)
                         .multilineTextAlignment(.center)
@@ -2370,7 +2380,16 @@ struct SpotifyImportHeroCard: View {
         .padding(LociTheme.Spacing.large)
         .lociCard()
         .sheet(isPresented: $showingImportSheet) {
-            EnhancedSpotifyImportView()
+            if dataStore.designatedLocation != nil {
+                StreamlinedSpotifyImportView()
+                    .environmentObject(spotifyManager)
+                    .environmentObject(dataStore)
+            } else {
+                EnhancedSpotifyImportView()
+                    .environmentObject(spotifyManager)
+                    .environmentObject(dataStore)
+                    .environmentObject(LocationManager.shared)
+            }
         }
     }
 }
@@ -2738,6 +2757,300 @@ struct EmptyLeaderboardPreview: View {
                 .foregroundColor(LociTheme.Colors.subheadText)
             
             Spacer()
+        }
+    }
+}
+
+// MARK: - Location Selection Section
+
+struct LocationSelectionSection: View {
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var locationManager: LocationManager
+    @State private var showingLocationPicker = false
+    @State private var isDetectingLocation = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Your Location")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                if dataStore.designatedLocation != nil {
+                    Button("Change") {
+                        showingLocationPicker = true
+                    }
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+            }
+            
+            if let location = dataStore.designatedLocation {
+                SelectedLocationCard(location: location) {
+                    dataStore.clearDesignatedLocation()
+                }
+            } else {
+                LocationSelectionCard(
+                    onDetectLocation: detectCurrentLocation,
+                    onManualSelection: { showingLocationPicker = true },
+                    isDetecting: isDetectingLocation
+                )
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+        .sheet(isPresented: $showingLocationPicker) {
+            LocationPickerView(onLocationSelected: { region, building, coordinate in
+                dataStore.setDesignatedLocation(region: region, building: building, coordinate: coordinate)
+            })
+        }
+    }
+    
+    private func detectCurrentLocation() {
+        guard locationManager.authorizationStatus == .authorizedAlways ||
+              locationManager.authorizationStatus == .authorizedWhenInUse else {
+            locationManager.requestPermissions()
+            return
+        }
+        
+        isDetectingLocation = true
+        
+        locationManager.requestOneTimeLocation { location in
+            guard let location = location else {
+                isDetectingLocation = false
+                return
+            }
+            
+            Task {
+                let buildingInfo = await ReverseGeocoding.shared.reverseGeocodeAsync(location: location)
+                
+                DispatchQueue.main.async {
+                    let region = buildingInfo?.city ?? buildingInfo?.neighborhood ?? "Your Area"
+                    let building = buildingInfo?.name
+                    
+                    dataStore.setDesignatedLocation(
+                        region: region,
+                        building: building,
+                        coordinate: location.coordinate
+                    )
+                    
+                    isDetectingLocation = false
+                }
+            }
+        }
+    }
+}
+
+struct SelectedLocationCard: View {
+    let location: DataStore.DesignatedLocation
+    let onRemove: () -> Void
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            Image(systemName: location.building != nil ? "building.2.fill" : "map.fill")
+                .font(.system(size: 20))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text(location.displayName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text(location.building != nil ? "Building & Region" : "Region Only")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+            
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(LociTheme.Colors.disabledState)
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .background(LociTheme.Colors.secondaryHighlight.opacity(0.1))
+        .cornerRadius(LociTheme.CornerRadius.medium)
+    }
+}
+
+struct LocationSelectionCard: View {
+    let onDetectLocation: () -> Void
+    let onManualSelection: () -> Void
+    let isDetecting: Bool
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            Button(action: onDetectLocation) {
+                HStack {
+                    if isDetecting {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
+                            .scaleEffect(0.8)
+                        Text("Detecting...")
+                    } else {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                        Text("Auto-Detect Location")
+                    }
+                    
+                    Spacer()
+                    
+                    if !isDetecting {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    }
+                }
+                .foregroundColor(LociTheme.Colors.mainText)
+                .padding(LociTheme.Spacing.medium)
+                .background(LociTheme.Colors.disabledState.opacity(0.3))
+                .cornerRadius(LociTheme.CornerRadius.small)
+            }
+            .disabled(isDetecting)
+            
+            Button(action: onManualSelection) {
+                HStack {
+                    Image(systemName: "map")
+                        .font(.system(size: 18))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    Text("Select Manually")
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                .foregroundColor(LociTheme.Colors.mainText)
+                .padding(LociTheme.Spacing.medium)
+                .background(LociTheme.Colors.disabledState.opacity(0.3))
+                .cornerRadius(LociTheme.CornerRadius.small)
+            }
+        }
+    }
+}
+
+struct LocationPickerView: View {
+    let onLocationSelected: (String, String?, CLLocationCoordinate2D?) -> Void
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var mapRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+    )
+    @State private var isReverseGeocoding = false
+    @State private var selectedType: LocationType = .regionOnly
+    
+    enum LocationType: CaseIterable {
+        case regionOnly, building
+        
+        var title: String {
+            switch self {
+            case .regionOnly: return "Region Only"
+            case .building: return "Specific Building"
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // Map
+                Map(coordinateRegion: $mapRegion)
+                    .ignoresSafeArea(edges: .bottom)
+                
+                // Center crosshair
+                Image(systemName: "plus")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                // Selection UI
+                VStack {
+                    // Type selector
+                    VStack(spacing: LociTheme.Spacing.small) {
+                        HStack(spacing: 0) {
+                            ForEach(LocationType.allCases, id: \.self) { type in
+                                Button(type.title) {
+                                    selectedType = type
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(selectedType == type ? .white : LociTheme.Colors.subheadText)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, LociTheme.Spacing.small)
+                                .background(selectedType == type ? LociTheme.Colors.primaryAction : Color.clear)
+                                .cornerRadius(LociTheme.CornerRadius.small)
+                            }
+                        }
+                        .background(LociTheme.Colors.disabledState)
+                        .cornerRadius(LociTheme.CornerRadius.medium)
+                        .padding(.horizontal)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(spacing: LociTheme.Spacing.medium) {
+                        if isReverseGeocoding {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                Text("Finding location...")
+                                    .font(LociTheme.Typography.body)
+                                    .foregroundColor(.white)
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(LociTheme.CornerRadius.medium)
+                        }
+                        
+                        HStack(spacing: LociTheme.Spacing.small) {
+                            Button("Cancel") {
+                                dismiss()
+                            }
+                            .lociButton(.secondary)
+                            
+                            Button("Select This Location") {
+                                selectCurrentLocation()
+                            }
+                            .lociButton(.primary)
+                            .disabled(isReverseGeocoding)
+                        }
+                        .padding()
+                    }
+                }
+            }
+            .navigationTitle("Select Your Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Center on user's current location if available
+                if let currentLocation = locationManager.currentLocation {
+                    mapRegion.center = currentLocation.coordinate
+                }
+            }
+        }
+    }
+    
+    private func selectCurrentLocation() {
+        isReverseGeocoding = true
+        let coordinate = mapRegion.center
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        
+        Task {
+            let buildingInfo = await ReverseGeocoding.shared.reverseGeocodeAsync(location: location)
+            
+            DispatchQueue.main.async {
+                let region = buildingInfo?.city ?? buildingInfo?.neighborhood ?? "Selected Area"
+                let building = selectedType == .building ? buildingInfo?.name : nil
+                
+                onLocationSelected(region, building, coordinate)
+                isReverseGeocoding = false
+                dismiss()
+            }
         }
     }
 }

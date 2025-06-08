@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import Combine
 import CloudKit
+import CoreLocation
 
 @MainActor
 class DataStore: ObservableObject {
@@ -18,6 +19,53 @@ class DataStore: ObservableObject {
     var singleSessionBuildingName: String?
     private var activeOnePlaceSession: Session?
 
+    // MARK: - Designated Location System
+
+    @Published var designatedLocation: DesignatedLocation?
+
+    struct DesignatedLocation: Codable {
+        let region: String
+        let building: String?
+        let coordinate: CLLocationCoordinate2D?
+        let lastUpdated: Date
+        
+        var displayName: String {
+            if let building = building {
+                return "\(building), \(region)"
+            }
+            return region
+        }
+    }
+
+    func setDesignatedLocation(region: String, building: String? = nil, coordinate: CLLocationCoordinate2D? = nil) {
+        designatedLocation = DesignatedLocation(
+            region: region,
+            building: building,
+            coordinate: coordinate,
+            lastUpdated: Date()
+        )
+        
+        // Save to UserDefaults
+        if let encoded = try? JSONEncoder().encode(designatedLocation) {
+            UserDefaults.standard.set(encoded, forKey: "designatedLocation")
+        }
+        
+        print("✅ Set designated location: \(designatedLocation?.displayName ?? "Unknown")")
+    }
+
+    func loadDesignatedLocation() {
+        if let data = UserDefaults.standard.data(forKey: "designatedLocation"),
+           let decoded = try? JSONDecoder().decode(DesignatedLocation.self, from: data) {
+            designatedLocation = decoded
+            print("✅ Loaded designated location: \(decoded.displayName)")
+        }
+    }
+
+    func clearDesignatedLocation() {
+        designatedLocation = nil
+        UserDefaults.standard.removeObject(forKey: "designatedLocation")
+    }
+
     private init() {
         self.container = try! ModelContainer(
             for: Session.self, ListeningEvent.self, BuildingChange.self
@@ -25,6 +73,7 @@ class DataStore: ObservableObject {
         
         fetchSessionHistory()
         loadActiveOnePlaceSession()
+        loadDesignatedLocation()
     }
 
     // MARK: - Current Session Management
@@ -273,14 +322,22 @@ class DataStore: ObservableObject {
     // MARK: - Leaderboard Data Integration
 
     func getLeaderboardData(scope: LocationScope, type: LeaderboardType, context: LocationContext) -> [UserListeningData] {
+        print("🔍 DataStore.getLeaderboardData called for scope: \(scope.displayName), type: \(type.displayName)")
+        print("🔍 Current sessionHistory count: \(sessionHistory.count)")
+        print("🔍 Current importBatches count: \(importBatches.count)")
+        
+        let result: [UserListeningData]
         switch scope {
         case .building:
-            return getBuildingLeaderboardData(buildingName: context.building, type: type)
+            result = getBuildingLeaderboardData(buildingName: context.building, type: type)
         case .region:
-            return getRegionalLeaderboardData(region: context.region, type: type)
+            result = getRegionalLeaderboardData(region: context.region, type: type)
         case .state, .country, .global:
-            return getGlobalLeaderboardData(type: type) // Would filter by state/country in production
+            result = getGlobalLeaderboardData(type: type) // Would filter by state/country in production
         }
+        
+        print("🔍 Returning \(result.count) user data entries")
+        return result
     }
 
     private func getBuildingLeaderboardData(buildingName: String?, type: LeaderboardType) -> [UserListeningData] {
@@ -312,6 +369,7 @@ class DataStore: ObservableObject {
     }
 
     private func aggregateUserData(sessions: [Session], imports: [ImportBatch], type: LeaderboardType) -> [UserListeningData] {
+        print("🔍 aggregateUserData called with \(sessions.count) sessions, \(imports.count) imports")
         var userDataMap: [String: UserListeningData] = [:]
         
         // Process sessions
@@ -335,6 +393,7 @@ class DataStore: ObservableObject {
             
             // Add session data
             userDataMap[userId]?.addSession(session)
+            print("🔍 Added session with \(session.events.count) events")
         }
         
         // Process imports
@@ -358,11 +417,17 @@ class DataStore: ObservableObject {
             
             // Add import data
             userDataMap[userId]?.addImportBatch(importBatch)
+            print("🔍 Added import batch with \(importBatch.tracks.count) tracks")
+        }
+        
+        if let currentUser = userDataMap["current-user"] {
+            print("🔍 Current user has \(currentUser.totalSongs) total songs, \(currentUser.totalMinutes) total minutes")
         }
         
         // Add demo users for testing
         addDemoUsers(to: &userDataMap, basedOn: userDataMap["current-user"])
         
+        print("🔍 Final userDataMap has \(userDataMap.count) users")
         return Array(userDataMap.values)
     }
 
@@ -584,4 +649,6 @@ extension SessionDuration {
         else { return .sixteenHours }
     }
 }
+
+
 

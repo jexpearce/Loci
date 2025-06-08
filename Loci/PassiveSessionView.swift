@@ -38,7 +38,7 @@ struct OnePlaceSessionView: View {
                         OnePlaceActiveStatusCard()
                     } else {
                         // Location Selection
-                        LocationSelectionCard(
+                        LocationSelectionCard2(
                             selectedLocation: $selectedLocation,
                             isLoading: $isLoadingLocation,
                             error: $locationError,
@@ -401,7 +401,7 @@ struct OnePlaceStatItem: View {
 
 // MARK: - Enhanced Location Selection Card
 
-struct LocationSelectionCard: View {
+struct LocationSelectionCard2: View {
     @Binding var selectedLocation: SelectedLocation?
     @Binding var isLoading: Bool
     @Binding var error: String?

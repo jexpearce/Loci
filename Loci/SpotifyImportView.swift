@@ -2,6 +2,254 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+// MARK: - Streamlined Spotify Import View (Uses Designated Location)
+
+struct StreamlinedSpotifyImportView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var dataStore: DataStore
+    
+    @State private var isLoading = false
+    @State private var recentTracks: [SpotifyImportTrack] = []
+    @State private var selectedTracks: Set<String> = []
+    @State private var errorMessage: String?
+    @State private var importStep: ImportStep = .loading
+    
+    enum ImportStep {
+        case loading
+        case trackSelection
+        case confirmation
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LociTheme.Colors.appBackground
+                    .ignoresSafeArea()
+                
+                switch importStep {
+                case .loading:
+                    LoadingImportView()
+                case .trackSelection:
+                    TrackSelectionView()
+                case .confirmation:
+                    ImportConfirmationView()
+                }
+            }
+            .navigationTitle("Share to \(dataStore.designatedLocation?.displayName ?? "Your Area")")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                if importStep == .trackSelection {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Share") {
+                            processImport()
+                        }
+                        .disabled(selectedTracks.isEmpty)
+                        .foregroundColor(selectedTracks.isEmpty ? LociTheme.Colors.disabledState : LociTheme.Colors.secondaryHighlight)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            loadRecentTracks()
+        }
+    }
+    
+    // MARK: - Loading View
+    
+    @ViewBuilder
+    func LoadingImportView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
+                .scaleEffect(1.5)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Fetching Your Recent Plays")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Getting your last 50 tracks from Spotify")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+        }
+    }
+    
+    // MARK: - Track Selection View
+    
+    @ViewBuilder
+    func TrackSelectionView() -> some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Header
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Select Tracks to Share")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                HStack {
+                    Button(selectedTracks.count == recentTracks.count ? "Deselect All" : "Select All") {
+                        if selectedTracks.count == recentTracks.count {
+                            selectedTracks.removeAll()
+                        } else {
+                            selectedTracks = Set(recentTracks.map { $0.id })
+                        }
+                    }
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    
+                    Spacer()
+                    
+                    Text("\(selectedTracks.count) of \(recentTracks.count) selected")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+            .padding(.horizontal)
+            
+            // Track List
+            List(recentTracks, id: \.id) { track in
+                SelectableTrackRow(
+                    track: track,
+                    isSelected: selectedTracks.contains(track.id)
+                ) {
+                    if selectedTracks.contains(track.id) {
+                        selectedTracks.remove(track.id)
+                    } else {
+                        selectedTracks.insert(track.id)
+                    }
+                }
+                .listRowBackground(LociTheme.Colors.contentContainer)
+            }
+            .listStyle(PlainListStyle())
+        }
+    }
+    
+    // MARK: - Confirmation View
+    
+    @ViewBuilder
+    func ImportConfirmationView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Success Header
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                Text("Shared Successfully!")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+            }
+            
+            // Summary
+            VStack(spacing: LociTheme.Spacing.medium) {
+                StreamlinedImportSummaryCard(
+                    trackCount: selectedTracks.count,
+                    location: dataStore.designatedLocation?.displayName ?? "Your Area"
+                )
+                
+                Button("Done") {
+                    dismiss()
+                }
+                .lociButton(.primary, isFullWidth: true)
+            }
+        }
+    }
+    
+    private func loadRecentTracks() {
+        isLoading = true
+        
+        Task {
+            do {
+                let tracks = try await spotifyManager.fetchRecentlyPlayedTracks(limit: 50)
+                
+                await MainActor.run {
+                    self.recentTracks = tracks
+                    self.selectedTracks = Set(tracks.map { $0.id }) // Select all by default
+                    self.importStep = .trackSelection
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func processImport() {
+        guard let designatedLocation = dataStore.designatedLocation else { return }
+        
+        // Filter selected tracks
+        let tracksToImport = recentTracks.filter { selectedTracks.contains($0.id) }
+        
+        // Use designated location for assignment type
+        let assignmentType: LocationAssignmentType = designatedLocation.building != nil ? .building : .region
+        let locationName = designatedLocation.building ?? designatedLocation.region
+        
+        // Create import batch
+        let importBatch = ImportBatch(
+            id: UUID(),
+            tracks: tracksToImport,
+            location: locationName,
+            assignmentType: assignmentType,
+            importedAt: Date()
+        )
+        
+        // Save to data store (triggers leaderboard update)
+        dataStore.saveImportBatch(importBatch)
+        
+        // Update SpotifyManager
+        spotifyManager.hasRecentImports = true
+        
+        // Manually trigger leaderboard refresh
+        Task { @MainActor in
+            await LeaderboardManager.shared.loadLeaderboards(forceRefresh: true)
+        }
+        
+        // Move to confirmation
+        withAnimation { importStep = .confirmation }
+    }
+}
+
+struct StreamlinedImportSummaryCard: View {
+    let trackCount: Int
+    let location: String
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            HStack {
+                Text("Shared to \(location)")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                Spacer()
+            }
+            
+            HStack {
+                Image(systemName: "music.note")
+                    .font(.system(size: 16))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                    .frame(width: 24)
+                
+                Text("\(trackCount) tracks")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                    .fontWeight(.medium)
+                
+                Spacer()
+            }
+        }
+        .padding(LociTheme.Spacing.medium)
+        .lociCard()
+    }
+}
+
 // MARK: - Enhanced Spotify Import View (NEW)
 
 struct EnhancedSpotifyImportView: View {
