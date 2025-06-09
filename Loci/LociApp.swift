@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseCore
+import GoogleSignIn
 
 @main
 struct LociApp: App {
@@ -23,6 +24,9 @@ struct LociApp: App {
     init() {
         // Configure Firebase
         FirebaseApp.configure()
+        
+        // Google Sign-In will be configured automatically by FirebaseManager
+        print("🚀 Loci app initialized")
     }
     
     var body: some Scene {
@@ -540,8 +544,13 @@ struct UserProfileView: View {
                 
                 await MainActor.run {
                     isUploadingImage = false
-                    // Clear the local profile image so it reloads from Firebase
+                    // Clear the local profile image and cache so it reloads from Firebase
                     profileImage = nil
+                    
+                    // Clear cached version if it exists
+                    if let imageURL = firebaseManager.currentUser?.profileImageURL {
+                        ImageCache.shared.removeImage(for: imageURL)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -649,31 +658,70 @@ struct CachedAsyncImage<Content, Placeholder>: View where Content: View, Placeho
     }
 }
 
-// MARK: - Simple Image Cache
+// MARK: - Enhanced Image Cache with Persistent Storage
 
 class ImageCache {
     static let shared = ImageCache()
     private let cache = NSCache<NSString, UIImage>()
+    private let fileManager = FileManager.default
+    private let cacheDirectory: URL
     
     private init() {
         cache.countLimit = 100
         cache.totalCostLimit = 50 * 1024 * 1024 // 50MB
+        
+        // Create cache directory
+        let urls = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
+        cacheDirectory = urls[0].appendingPathComponent("ImageCache")
+        
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
     
     func setImage(_ image: UIImage, for key: String) {
+        // Store in memory cache
         cache.setObject(image, forKey: NSString(string: key))
+        
+        // Store in persistent cache
+        let filename = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "unknown"
+        let fileURL = cacheDirectory.appendingPathComponent("\(filename).jpg")
+        
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            try? data.write(to: fileURL)
+        }
     }
     
     func image(for key: String) -> UIImage? {
-        return cache.object(forKey: NSString(string: key))
+        // Check memory cache first
+        if let cachedImage = cache.object(forKey: NSString(string: key)) {
+            return cachedImage
+        }
+        
+        // Check persistent cache
+        let filename = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "unknown"
+        let fileURL = cacheDirectory.appendingPathComponent("\(filename).jpg")
+        
+        if let data = try? Data(contentsOf: fileURL),
+           let image = UIImage(data: data) {
+            // Store back in memory cache
+            cache.setObject(image, forKey: NSString(string: key))
+            return image
+        }
+        
+        return nil
     }
     
     func removeImage(for key: String) {
         cache.removeObject(forKey: NSString(string: key))
+        
+        let filename = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "unknown"
+        let fileURL = cacheDirectory.appendingPathComponent("\(filename).jpg")
+        try? fileManager.removeItem(at: fileURL)
     }
     
     func clearCache() {
         cache.removeAllObjects()
+        try? fileManager.removeItem(at: cacheDirectory)
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 }
 
@@ -684,10 +732,11 @@ struct EditProfileView: View {
     @EnvironmentObject var firebaseManager: FirebaseManager
     
     @State private var displayName = ""
-    @State private var username = ""
+    @State private var username = "Loading..."
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
+    @State private var isExistingAccount = false
     
     var body: some View {
         NavigationView {
@@ -728,37 +777,63 @@ struct EditProfileView: View {
                                     .textFieldStyle(EditProfileTextFieldStyle())
                             }
                             
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Username")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                
-                                HStack {
-                                    Text("@")
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .padding(.leading, 16)
-                                    
-                                    TextField("", text: $username)
-                                        .textFieldStyle(PlainTextFieldStyle())
-                                        .autocapitalization(.none)
+                            if !isExistingAccount {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Username")
+                                        .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(.white)
-                                        .padding(.vertical, 16)
-                                        .padding(.trailing, 16)
+                                    
+                                    HStack {
+                                        Text("@")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .padding(.leading, 16)
+                                        
+                                        TextField("", text: $username)
+                                            .textFieldStyle(PlainTextFieldStyle())
+                                            .autocapitalization(.none)
+                                            .foregroundColor(.white)
+                                            .padding(.vertical, 16)
+                                            .padding(.trailing, 16)
+                                    }
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color.white.opacity(0.1))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                            )
+                                    )
+                                    
+                                    if !username.isEmpty && !isValidUsername(username) {
+                                        Text("Username must be 3-20 characters (letters, numbers, underscores only)")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.red)
+                                    }
                                 }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.white.opacity(0.1))
-                                        .overlay(
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Username")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+                                    
+                                    Text("@\(username)")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 16)
+                                        .background(
                                             RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                                .fill(Color.white.opacity(0.05))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 12)
+                                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                                )
                                         )
-                                )
-                                
-                                if !username.isEmpty && !isValidUsername(username) {
-                                    Text("Username must be 3-20 characters (letters, numbers, underscores only)")
+                                    
+                                    Text("Username editing temporarily disabled for existing accounts")
                                         .font(.system(size: 12))
-                                        .foregroundColor(.red)
+                                        .foregroundColor(.white.opacity(0.6))
                                 }
                             }
                             
@@ -821,12 +896,23 @@ struct EditProfileView: View {
             }
         }
         .onAppear {
+            print("📱 EditProfileView appeared")
             loadCurrentUserData()
+        }
+        .onReceive(firebaseManager.$currentUser) { user in
+            print("👤 Current user updated: \(user?.displayName ?? "nil")")
+            if user != nil {
+                loadCurrentUserData()
+            }
         }
     }
     
     private var isFormValid: Bool {
-        !displayName.isEmpty && !username.isEmpty && isValidUsername(username)
+        if isExistingAccount {
+            return !displayName.isEmpty
+        } else {
+            return !displayName.isEmpty && !username.isEmpty && isValidUsername(username)
+        }
     }
     
     private func isValidUsername(_ username: String) -> Bool {
@@ -836,10 +922,56 @@ struct EditProfileView: View {
     }
     
     private func loadCurrentUserData() {
+        print("🔍 Loading current user data...")
+        
         if let user = firebaseManager.currentUser {
+            print("✅ User found: \(user.displayName), username: '\(user.username)'")
             displayName = user.displayName
-            username = user.username
+            
+            // Handle existing accounts that might not have username set
+            if user.username.isEmpty {
+                print("⚠️ Username is empty, generating suggested username")
+                // Generate a suggested username from display name or email
+                let suggestedUsername = generateSuggestedUsername(from: user.displayName, email: user.email)
+                username = suggestedUsername
+                isExistingAccount = true // Disable username editing for existing accounts
+                print("💡 Generated username: \(suggestedUsername)")
+            } else {
+                print("✅ Using existing username: \(user.username)")
+                username = user.username
+                isExistingAccount = false // Allow username editing for new accounts
+            }
+        } else {
+            print("❌ No current user found")
+            // Set fallback values
+            displayName = ""
+            username = "user_" + String(Int.random(in: 1000...9999))
+            isExistingAccount = true
         }
+        
+        print("📝 Final values - displayName: '\(displayName)', username: '\(username)', isExisting: \(isExistingAccount)")
+    }
+    
+    private func generateSuggestedUsername(from displayName: String, email: String) -> String {
+        // First try to create username from display name
+        let cleanDisplayName = displayName
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
+        
+        if cleanDisplayName.count >= 3 {
+            return String(cleanDisplayName.prefix(15))
+        }
+        
+        // Fallback to email prefix
+        let emailPrefix = email.components(separatedBy: "@").first ?? "user"
+        let cleanEmailPrefix = emailPrefix
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
+        
+        return String(cleanEmailPrefix.prefix(15))
     }
     
     private func saveProfile() {
@@ -849,18 +981,22 @@ struct EditProfileView: View {
         
         Task {
             do {
-                // Check if username is taken (if changed)
-                if username.lowercased() != firebaseManager.currentUser?.username.lowercased() {
-                    try await checkUsernameAvailability()
-                }
-                
-                // Update profile
-                let updates: [String: Any] = [
-                    "displayName": displayName,
-                    "username": username.lowercased()
+                // For existing accounts that might not have username field, 
+                // we need to handle this more carefully
+                var updates: [String: Any] = [
+                    "displayName": displayName
                 ]
                 
-                try await firebaseManager.updateUserProfile(updates)
+                // Only update username if it's different, valid, and not an existing account
+                let currentUsername = firebaseManager.currentUser?.username ?? ""
+                if !isExistingAccount && username.lowercased() != currentUsername.lowercased() && !username.isEmpty {
+                    // Check if username is taken
+                    try await checkUsernameAvailability()
+                    updates["username"] = username.lowercased()
+                }
+                
+                // Try to update profile using safer method
+                try await firebaseManager.safeUpdateUserProfile(updates)
                 
                 await MainActor.run {
                     isLoading = false
@@ -874,7 +1010,15 @@ struct EditProfileView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = error.localizedDescription
+                    
+                    // Provide more helpful error messages
+                    if error.localizedDescription.contains("permission") || error.localizedDescription.contains("insufficient") {
+                        errorMessage = "Unable to update username. This might be due to account restrictions. Try updating just your display name for now."
+                    } else if let firebaseError = error as? FirebaseError {
+                        errorMessage = firebaseError.localizedDescription
+                    } else {
+                        errorMessage = "Update failed: \(error.localizedDescription)"
+                    }
                 }
             }
         }

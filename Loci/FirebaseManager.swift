@@ -5,6 +5,9 @@ import FirebaseFirestore
 import FirebaseStorage
 import CoreLocation
 import Combine
+import GoogleSignIn
+import AuthenticationServices
+import CryptoKit
 
 @MainActor
 class FirebaseManager: ObservableObject {
@@ -14,14 +17,22 @@ class FirebaseManager: ObservableObject {
     @Published var currentUser: User?
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var isGoogleSignInAvailable = false
+    @Published var isAppleSignInAvailable = false
     
     private let db = Firestore.firestore()
     private let auth = Auth.auth()
     private var authStateListener: AuthStateDidChangeListenerHandle?
     private var cancellables = Set<AnyCancellable>()
     
+    // Apple Sign In
+    private var currentNonce: String?
+    private var appleSignInDelegate: AppleSignInDelegate?
+    
     private init() {
         setupAuthStateListener()
+        checkGoogleSignInAvailability()
+        checkAppleSignInAvailability()
     }
     
     deinit {
@@ -130,6 +141,221 @@ class FirebaseManager: ObservableObject {
         try await auth.sendPasswordReset(withEmail: email)
     }
     
+    func signInWithGoogle() async throws {
+        guard isGoogleSignInAvailable else {
+            throw FirebaseError.invalidData
+        }
+        
+        // Get the root view controller
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            throw FirebaseError.invalidData
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController)
+            
+            guard let idToken = result.user.idToken?.tokenString else {
+                throw FirebaseError.invalidData
+            }
+            
+            let credential = GoogleAuthProvider.credential(withIDToken: idToken,
+                                                           accessToken: result.user.accessToken.tokenString)
+            
+            let authResult = try await auth.signIn(with: credential)
+            
+            // Check if this is a new user and create profile if needed
+            if authResult.additionalUserInfo?.isNewUser == true {
+                let user = User(
+                    id: authResult.user.uid,
+                    email: authResult.user.email ?? "",
+                    displayName: authResult.user.displayName ?? "Google User",
+                    username: generateUsernameFromEmail(authResult.user.email ?? ""),
+                    spotifyUserId: nil,
+                    profileImageURL: authResult.user.photoURL?.absoluteString,
+                    joinedDate: Date(),
+                    privacySettings: PrivacySettings(),
+                    musicPreferences: MusicPreferences()
+                )
+                
+                try await saveUserProfile(user: user)
+            }
+            
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
+            throw error
+        }
+    }
+    
+    private func generateUsernameFromEmail(_ email: String) -> String {
+        let emailPrefix = email.components(separatedBy: "@").first ?? "user"
+        let cleanPrefix = emailPrefix
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
+        
+        // Add some randomness to avoid conflicts
+        let randomSuffix = String(Int.random(in: 100...999))
+        return "\(String(cleanPrefix.prefix(12)))\(randomSuffix)"
+    }
+    
+    // MARK: - Apple Sign In
+    
+    func signInWithApple() async throws {
+        guard isAppleSignInAvailable else {
+            throw FirebaseError.invalidData
+        }
+        
+        let nonce = randomNonceString()
+        currentNonce = nonce
+        
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = sha256(nonce)
+        
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let result = try await performAppleSignIn(request: request)
+            
+            guard let appleIDCredential = result.credential as? ASAuthorizationAppleIDCredential,
+                  let nonce = currentNonce,
+                  let appleIDToken = appleIDCredential.identityToken,
+                  let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+                throw FirebaseError.invalidData
+            }
+            
+            let credential = OAuthProvider.credential(withProviderID: "apple.com",
+                                                      idToken: idTokenString,
+                                                      rawNonce: nonce)
+            
+            let authResult = try await auth.signIn(with: credential)
+            
+            // Check if this is a new user and create profile if needed
+            if authResult.additionalUserInfo?.isNewUser == true {
+                let displayName: String
+                let username: String
+                
+                if let givenName = appleIDCredential.fullName?.givenName,
+                   let familyName = appleIDCredential.fullName?.familyName,
+                   !givenName.isEmpty || !familyName.isEmpty {
+                    displayName = "\(givenName) \(familyName)".trimmingCharacters(in: .whitespaces)
+                } else {
+                    displayName = "Apple User"
+                }
+                
+                // Generate username from Apple ID or create a random one
+                if let email = appleIDCredential.email {
+                    username = generateUsernameFromEmail(email)
+                } else {
+                    username = "user\(String(Int.random(in: 10000...99999)))"
+                }
+                
+                let user = User(
+                    id: authResult.user.uid,
+                    email: authResult.user.email ?? appleIDCredential.email ?? "",
+                    displayName: displayName,
+                    username: username,
+                    spotifyUserId: nil,
+                    profileImageURL: authResult.user.photoURL?.absoluteString,
+                    joinedDate: Date(),
+                    privacySettings: PrivacySettings(),
+                    musicPreferences: MusicPreferences()
+                )
+                
+                try await saveUserProfile(user: user)
+            }
+            
+            currentNonce = nil
+            isLoading = false
+        } catch {
+            currentNonce = nil
+            isLoading = false
+            errorMessage = error.localizedDescription
+            throw error
+        }
+    }
+    
+    @MainActor
+    private func performAppleSignIn(request: ASAuthorizationAppleIDRequest) async throws -> ASAuthorization {
+        return try await withCheckedThrowingContinuation { continuation in
+            let delegate = AppleSignInDelegate()
+            
+            // Store delegate to prevent deallocation
+            self.appleSignInDelegate = delegate
+            
+            delegate.completion = { result in
+                self.appleSignInDelegate = nil // Clean up
+                
+                switch result {
+                case .success(let authorization):
+                    continuation.resume(returning: authorization)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = delegate
+            controller.presentationContextProvider = delegate
+            controller.performRequests()
+        }
+    }
+    
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+        
+        while remainingLength > 0 {
+            let randoms: [UInt8] = (0..<16).map { _ in
+                var random: UInt8 = 0
+                let errorCode = SecRandomCopyBytes(kSecRandomDefault, 1, &random)
+                if errorCode != errSecSuccess {
+                    fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(errorCode)")
+                }
+                return random
+            }
+            
+            randoms.forEach { random in
+                if remainingLength == 0 {
+                    return
+                }
+                
+                if random < charset.count {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        let hashString = hashedData.compactMap {
+            return String(format: "%02x", $0)
+        }.joined()
+        
+        return hashString
+    }
+    
+    private func checkAppleSignInAvailability() {
+        // Apple Sign In is available on iOS 13+ and the simulator
+        isAppleSignInAvailable = true
+        print("✅ Apple Sign-In: Available")
+    }
+    
     // MARK: - User Profile Management
     
     private func loadUserProfile(userId: String) async {
@@ -156,6 +382,58 @@ class FirebaseManager: ObservableObject {
         }
         
         try await db.collection("users").document(userId).updateData(updates)
+        await loadUserProfile(userId: userId)
+    }
+    
+    // Safer method for updating profiles that handles missing fields
+    func safeUpdateUserProfile(_ updates: [String: Any]) async throws {
+        guard let userId = auth.currentUser?.uid else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        let userRef = db.collection("users").document(userId)
+        
+        // Check if document exists and has all required fields
+        let document = try await userRef.getDocument()
+        
+        if document.exists {
+            // Document exists, try to update
+            do {
+                try await userRef.updateData(updates)
+            } catch {
+                // If update fails (e.g., field doesn't exist), use setData with merge
+                print("Update failed, trying merge operation: \(error)")
+                try await userRef.setData(updates, merge: true)
+            }
+        } else {
+            // Document doesn't exist, create it with required fields
+            let baseUserData: [String: Any] = [
+                "id": userId,
+                "email": auth.currentUser?.email ?? "",
+                "displayName": updates["displayName"] ?? "",
+                "username": updates["username"] ?? "",
+                "spotifyUserId": NSNull(),
+                "profileImageURL": NSNull(),
+                "joinedDate": FieldValue.serverTimestamp(),
+                "privacySettings": [
+                    "shareLocation": true,
+                    "shareListeningActivity": true,
+                    "allowFriendRequests": true,
+                    "showOnlineStatus": true,
+                    "topItemsVisibility": "friends"
+                ],
+                "musicPreferences": [
+                    "favoriteGenres": [],
+                    "favoriteArtists": [],
+                    "discoverabilityRadius": 1000
+                ]
+            ]
+            
+            // Merge with provided updates
+            let mergedData = baseUserData.merging(updates) { _, new in new }
+            try await userRef.setData(mergedData)
+        }
+        
         await loadUserProfile(userId: userId)
     }
     
@@ -347,6 +625,22 @@ class FirebaseManager: ObservableObject {
                 completion(activities)
             }
     }
+    
+    private func checkGoogleSignInAvailability() {
+        guard let clientID = FirebaseApp.app()?.options.clientID else {
+            print("❌ Google Sign-In: CLIENT_ID not found in Firebase configuration")
+            isGoogleSignInAvailable = false
+            return
+        }
+        
+        print("✅ Google Sign-In: CLIENT_ID found: \(String(clientID.prefix(20)))...")
+        isGoogleSignInAvailable = true
+        
+        // Configure Google Sign-In if available
+        let config = GIDConfiguration(clientID: clientID)
+        GIDSignIn.sharedInstance.configuration = config
+        print("✅ Google Sign-In: Configuration complete")
+    }
 }
 
 // MARK: - Firebase-Compatible Models
@@ -428,5 +722,27 @@ struct FirebaseListeningEvent: Codable {
         )
                 event.id = UUID(uuidString: id) ?? UUID()
         return event
+    }
+}
+
+// MARK: - Apple Sign In Delegate
+
+private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    var completion: ((Result<ASAuthorization, Error>) -> Void)?
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        completion?(.success(authorization))
+    }
+    
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        completion?(.failure(error))
+    }
+    
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return UIWindow()
+        }
+        return window
     }
 } 

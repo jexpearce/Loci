@@ -428,6 +428,42 @@ struct User: Codable, Identifiable {
     let joinedDate: Date
     let privacySettings: PrivacySettings
     let musicPreferences: MusicPreferences
+    
+    // Custom initializer to handle missing username field for existing accounts
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        id = try container.decode(String.self, forKey: .id)
+        email = try container.decode(String.self, forKey: .email)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        
+        // Handle missing username field for existing accounts
+        username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
+        print("🔍 User model decoded - username: '\(username)', displayName: '\(displayName)'")
+        
+        spotifyUserId = try container.decodeIfPresent(String.self, forKey: .spotifyUserId)
+        profileImageURL = try container.decodeIfPresent(String.self, forKey: .profileImageURL)
+        joinedDate = try container.decode(Date.self, forKey: .joinedDate)
+        
+        // Handle missing privacy settings
+        privacySettings = try container.decodeIfPresent(PrivacySettings.self, forKey: .privacySettings) ?? PrivacySettings()
+        
+        // Handle missing music preferences
+        musicPreferences = try container.decodeIfPresent(MusicPreferences.self, forKey: .musicPreferences) ?? MusicPreferences()
+    }
+    
+    // Keep the regular initializer for creating new users
+    init(id: String, email: String, displayName: String, username: String, spotifyUserId: String?, profileImageURL: String?, joinedDate: Date, privacySettings: PrivacySettings, musicPreferences: MusicPreferences) {
+        self.id = id
+        self.email = email
+        self.displayName = displayName
+        self.username = username
+        self.spotifyUserId = spotifyUserId
+        self.profileImageURL = profileImageURL
+        self.joinedDate = joinedDate
+        self.privacySettings = privacySettings
+        self.musicPreferences = musicPreferences
+    }
 }
 
 // MARK: - Session Privacy

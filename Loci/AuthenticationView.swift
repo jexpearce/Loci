@@ -1,4 +1,6 @@
 import SwiftUI
+import GoogleSignIn
+import AuthenticationServices
 
 struct AuthenticationView: View {
     @StateObject private var firebaseManager = FirebaseManager.shared
@@ -208,6 +210,70 @@ struct AuthenticationView: View {
                             .disabled(firebaseManager.isLoading || !isFormValid)
                             .opacity(firebaseManager.isLoading || !isFormValid ? 0.6 : 1.0)
                             
+                            // Social Sign-In Section (only show if available)
+                            if firebaseManager.isGoogleSignInAvailable || firebaseManager.isAppleSignInAvailable {
+                                // Divider
+                                HStack {
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.3))
+                                        .frame(height: 1)
+                                    
+                                    Text("or")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(.horizontal, 16)
+                                    
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.3))
+                                        .frame(height: 1)
+                                }
+                                .padding(.vertical, 8)
+                                
+                                // Google Sign-In Button
+                                if firebaseManager.isGoogleSignInAvailable {
+                                    Button(action: signInWithGoogle) {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "globe")
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundColor(.black)
+                                            
+                                            Text("Continue with Google")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.black)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 56)
+                                        .background(Color.white)
+                                        .cornerRadius(16)
+                                    }
+                                    .disabled(firebaseManager.isLoading)
+                                    .opacity(firebaseManager.isLoading ? 0.6 : 1.0)
+                                }
+                                
+                                // Apple Sign-In Button
+                                if firebaseManager.isAppleSignInAvailable {
+                                    SignInWithAppleButton(
+                                        onRequest: { request in
+                                            // This will be handled by our custom implementation
+                                        },
+                                        onCompletion: { result in
+                                            // This will be handled by our custom implementation
+                                        }
+                                    )
+                                    .signInWithAppleButtonStyle(.white)
+                                    .frame(height: 56)
+                                    .cornerRadius(16)
+                                    .overlay(
+                                        Button(action: signInWithApple) {
+                                            Color.clear
+                                        }
+                                        .disabled(firebaseManager.isLoading)
+                                    )
+                                    .disabled(firebaseManager.isLoading)
+                                    .opacity(firebaseManager.isLoading ? 0.6 : 1.0)
+                                }
+                            }
+                            
                             // Forgot password (sign in only)
                             if authMode == .signIn {
                                 Button("Forgot Password?") {
@@ -298,6 +364,28 @@ struct AuthenticationView: View {
                 }
             } catch {
                 // Error is handled by FirebaseManager
+            }
+        }
+    }
+    
+    private func signInWithGoogle() {
+        Task {
+            do {
+                try await firebaseManager.signInWithGoogle()
+            } catch {
+                // Error is handled by FirebaseManager
+                print("Google Sign-In error: \(error)")
+            }
+        }
+    }
+    
+    private func signInWithApple() {
+        Task {
+            do {
+                try await firebaseManager.signInWithApple()
+            } catch {
+                // Error is handled by FirebaseManager
+                print("Apple Sign-In error: \(error)")
             }
         }
     }

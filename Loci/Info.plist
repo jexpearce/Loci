@@ -28,13 +28,19 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     
-    <!-- URL Schemes for Spotify OAuth Callback -->
+    <!-- URL Schemes for Spotify OAuth Callback and Google Sign-In -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>loci</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.773590397999-8rrkoj9e0op14ijngl9h7j0umipkujh6</string>
             </array>
         </dict>
     </array>
