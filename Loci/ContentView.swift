@@ -820,159 +820,16 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.05, green: 0.05, blue: 0.1),
-                        Color(red: 0.1, green: 0.05, blue: 0.15)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                settingsBackground
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        // Account Section
-                        SettingsSection(title: "Account") {
-                            SettingsRow(
-                                icon: "person.circle",
-                                title: "Account Info",
-                                subtitle: firebaseManager.currentUser?.email ?? "Not signed in",
-                                action: {}
-                            )
-                            
-                            if spotifyManager.isAuthenticated {
-                                SettingsRow(
-                                    icon: "music.note",
-                                    title: "Spotify Connected",
-                                    subtitle: "Disconnect to stop music tracking",
-                                    action: { spotifyManager.disconnect() }
-                                )
-                            } else {
-                                SettingsRow(
-                                    icon: "music.note",
-                                    title: "Connect Spotify",
-                                    subtitle: "Enable music tracking",
-                                    action: { spotifyManager.startAuthorization() }
-                                )
-                            }
-                        }
-                        
-                        // Privacy Section
-                        SettingsSection(title: "Privacy & Data") {
-                            SettingsToggleRow(
-                                icon: "location",
-                                title: "Share Location",
-                                subtitle: "Allow others to see your general area",
-                                isOn: $privacyManager.privacySettings.shareLocation
-                            )
-                            
-                            SettingsToggleRow(
-                                icon: "music.note",
-                                title: "Share Listening Activity",
-                                subtitle: "Show what you're listening to",
-                                isOn: $privacyManager.privacySettings.shareListeningActivity
-                            )
-                            
-                            SettingsToggleRow(
-                                icon: "person.2",
-                                title: "Allow Friend Requests",
-                                subtitle: "Let others send you friend requests",
-                                isOn: $privacyManager.privacySettings.allowFriendRequests
-                            )
-                            
-                            SettingsToggleRow(
-                                icon: "eye",
-                                title: "Show Online Status",
-                                subtitle: "Let friends see when you're active",
-                                isOn: $privacyManager.privacySettings.showOnlineStatus
-                            )
-                            
-                            SettingsRow(
-                                icon: "shield",
-                                title: "Privacy Explanation",
-                                subtitle: "How we protect your data",
-                                action: { showingPrivacyExplanation = true }
-                            )
-                        }
-                        
-                        // Notifications Section
-                        SettingsSection(title: "Notifications") {
-                            SettingsToggleRow(
-                                icon: "bell",
-                                title: "Push Notifications",
-                                subtitle: "Get notified about matches and activity",
-                                isOn: $notificationsEnabled
-                            )
-                        }
-                        
-                        // Data Management Section
-                        SettingsSection(title: "Data Management") {
-                            SettingsRow(
-                                icon: "square.and.arrow.up",
-                                title: "Export My Data",
-                                subtitle: "Download all your Loci data",
-                                action: { showingDataExportSheet = true }
-                            )
-                            
-                            SettingsRow(
-                                icon: "trash",
-                                title: "Delete All Data",
-                                subtitle: "Permanently remove all your data",
-                                action: { showingDeleteAccountAlert = true },
-                                isDestructive: true
-                            )
-                        }
-                        
-                        // About Section
-                        SettingsSection(title: "About") {
-                            SettingsRow(
-                                icon: "info.circle",
-                                title: "About Loci",
-                                subtitle: "Version 1.0",
-                                action: {}
-                            )
-                            
-                            SettingsRow(
-                                icon: "doc.text",
-                                title: "Terms of Service",
-                                subtitle: "View our terms and conditions",
-                                action: { openURL("https://loci.app/terms") }
-                            )
-                            
-                            SettingsRow(
-                                icon: "hand.raised",
-                                title: "Privacy Policy",
-                                subtitle: "Read our privacy policy",
-                                action: { openURL("https://loci.app/privacy") }
-                            )
-                            
-                            SettingsRow(
-                                icon: "questionmark.circle",
-                                title: "Support",
-                                subtitle: "Get help with Loci",
-                                action: { openURL("mailto:support@loci.app") }
-                            )
-                        }
-                        
-                        // Sign Out Button
-                        Button(action: { showingSignOutAlert = true }) {
-                            Text("Sign Out")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.red)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color.white.opacity(0.1))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
-                                        )
-                                )
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
+                        accountSection
+                        privacySection
+                        notificationsSection
+                        dataManagementSection
+                        aboutSection
+                        signOutButton
                         
                         Spacer(minLength: 40)
                     }
@@ -994,6 +851,171 @@ struct SettingsView: View {
         .onAppear {
             checkNotificationStatus()
         }
+    }
+    
+    // MARK: - Settings Sections
+    
+    private var settingsBackground: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.05, green: 0.05, blue: 0.1),
+                Color(red: 0.1, green: 0.05, blue: 0.15)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+    
+    private var accountSection: some View {
+        SettingsSection(title: "Account") {
+            SettingsRow(
+                icon: "person.circle",
+                title: "Account Info",
+                subtitle: firebaseManager.currentUser?.email ?? "Not signed in",
+                action: {}
+            )
+            
+            if spotifyManager.isAuthenticated {
+                SettingsRow(
+                    icon: "music.note",
+                    title: "Spotify Connected",
+                    subtitle: "Disconnect to stop music tracking",
+                    action: { 
+                        // Clear tokens and set authenticated to false
+                        spotifyManager.isAuthenticated = false
+                    }
+                )
+            } else {
+                SettingsRow(
+                    icon: "music.note",
+                    title: "Connect Spotify",
+                    subtitle: "Enable music tracking",
+                    action: { spotifyManager.startAuthorization() }
+                )
+            }
+        }
+    }
+    
+    private var privacySection: some View {
+        SettingsSection(title: "Privacy & Data") {
+            SettingsToggleRow(
+                icon: "location",
+                title: "Share Location",
+                subtitle: "Allow others to see your general area",
+                isOn: $privacyManager.privacySettings.shareLocation
+            )
+            
+            SettingsToggleRow(
+                icon: "music.note",
+                title: "Share Listening Activity",
+                subtitle: "Show what you're listening to",
+                isOn: $privacyManager.privacySettings.shareListeningActivity
+            )
+            
+            SettingsToggleRow(
+                icon: "person.2",
+                title: "Allow Friend Requests",
+                subtitle: "Let others send you friend requests",
+                isOn: $privacyManager.privacySettings.allowFriendRequests
+            )
+            
+            SettingsToggleRow(
+                icon: "eye",
+                title: "Show Online Status",
+                subtitle: "Let friends see when you're active",
+                isOn: $privacyManager.privacySettings.showOnlineStatus
+            )
+            
+            SettingsRow(
+                icon: "shield",
+                title: "Privacy Explanation",
+                subtitle: "How we protect your data",
+                action: { showingPrivacyExplanation = true }
+            )
+        }
+    }
+    
+    private var notificationsSection: some View {
+        SettingsSection(title: "Notifications") {
+            SettingsToggleRow(
+                icon: "bell",
+                title: "Push Notifications",
+                subtitle: "Get notified about matches and activity",
+                isOn: $notificationsEnabled
+            )
+        }
+    }
+    
+    private var dataManagementSection: some View {
+        SettingsSection(title: "Data Management") {
+            SettingsRow(
+                icon: "square.and.arrow.up",
+                title: "Export My Data",
+                subtitle: "Download all your Loci data",
+                action: { showingDataExportSheet = true }
+            )
+            
+            SettingsRow(
+                icon: "trash",
+                title: "Delete All Data",
+                subtitle: "Permanently remove all your data",
+                action: { showingDeleteAccountAlert = true },
+                isDestructive: true
+            )
+        }
+    }
+    
+    private var aboutSection: some View {
+        SettingsSection(title: "About") {
+            SettingsRow(
+                icon: "info.circle",
+                title: "About Loci",
+                subtitle: "Version 1.0",
+                action: {}
+            )
+            
+            SettingsRow(
+                icon: "doc.text",
+                title: "Terms of Service",
+                subtitle: "View our terms and conditions",
+                action: { openURL("https://loci.app/terms") }
+            )
+            
+            SettingsRow(
+                icon: "hand.raised",
+                title: "Privacy Policy",
+                subtitle: "Read our privacy policy",
+                action: { openURL("https://loci.app/privacy") }
+            )
+            
+            SettingsRow(
+                icon: "questionmark.circle",
+                title: "Support",
+                subtitle: "Get help with Loci",
+                action: { openURL("mailto:support@loci.app") }
+            )
+        }
+    }
+    
+    private var signOutButton: some View {
+        Button(action: { showingSignOutAlert = true }) {
+            Text("Sign Out")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                        )
+                )
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
         .onChange(of: privacyManager.privacySettings.shareLocation) { _ in
             privacyManager.updatePrivacySettings(privacyManager.privacySettings)
         }
@@ -1008,7 +1030,7 @@ struct SettingsView: View {
         }
         .onChange(of: notificationsEnabled) { newValue in
             if newValue {
-                notificationManager.requestPermissions()
+                notificationManager.requestNotificationPermission()
             }
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {

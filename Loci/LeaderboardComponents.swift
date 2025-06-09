@@ -1,225 +1,112 @@
 import SwiftUI
 
-// MARK: - Scope Tab
+// MARK: - Scope Indicator
 
-struct ScopeTab: View {
-    let scope: LocationScope
-    let isSelected: Bool
-    let action: () -> Void
+struct ScopeIndicator: View {
+    let scopes: [LocationScope]
+    let currentIndex: Int
     
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: LociTheme.Spacing.xSmall) {
-                Image(systemName: scope.icon)
-                    .font(.system(size: 14, weight: .medium))
-                
-                Text(scope.displayName)
-                    .font(.system(size: 14, weight: .semibold))
+        HStack(spacing: LociTheme.Spacing.xSmall) {
+            ForEach(0..<scopes.count, id: \.self) { index in
+                Circle()
+                    .fill(index == currentIndex ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(index == currentIndex ? 1.2 : 1.0)
+                    .animation(LociTheme.Animation.bouncy, value: currentIndex)
             }
-            .foregroundColor(isSelected ? LociTheme.Colors.appBackground : LociTheme.Colors.subheadText)
-            .padding(.horizontal, LociTheme.Spacing.medium)
-            .padding(.vertical, LociTheme.Spacing.small)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(isSelected ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState.opacity(0.3))
-                    .shadow(
-                        color: isSelected ? LociTheme.Colors.secondaryHighlight.opacity(0.3) : .clear,
-                        radius: isSelected ? 8 : 0
-                    )
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .scaleEffect(isSelected ? 1.05 : 1.0)
-        .animation(LociTheme.Animation.bouncy, value: isSelected)
-    }
-}
-
-// MARK: - Category Button
-
-struct CategoryButton: View {
-    let category: LeaderboardCategory
-    let isSelected: Bool
-    let isDisabled: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            Text(category.displayName)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(textColor)
-                .padding(.horizontal, LociTheme.Spacing.medium)
-                .padding(.vertical, LociTheme.Spacing.small)
-                .background(backgroundColor)
-                .cornerRadius(LociTheme.CornerRadius.medium)
-        }
-        .disabled(isDisabled)
-        .opacity(isDisabled ? 0.5 : 1.0)
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    private var textColor: Color {
-        if isSelected {
-            return LociTheme.Colors.appBackground
-        } else {
-            return LociTheme.Colors.mainText
-        }
-    }
-    
-    private var backgroundColor: Color {
-        if isSelected {
-            return LociTheme.Colors.primaryAction
-        } else {
-            return LociTheme.Colors.disabledState.opacity(0.3)
         }
     }
 }
 
-// MARK: - Type Dropdown Selector
+// MARK: - Leaderboard Type Switcher
 
-struct TypeDropdownSelector: View {
+struct LeaderboardTypeSwitcher: View {
     @Binding var selectedType: LeaderboardType
-    let availableTypes: [LeaderboardType]
-    let category: LeaderboardCategory
-    @State private var isExpanded = false
     
     var body: some View {
-        VStack(spacing: LociTheme.Spacing.xSmall) {
-            Button(action: { isExpanded.toggle() }) {
-                HStack {
-                    Text(selectedType.displayName)
-                        .font(.system(size: 16, weight: .medium))
+        HStack(spacing: 0) {
+            ForEach(LeaderboardType.allCases) { type in
+                Button(action: { selectedType = type }) {
+                    VStack(spacing: LociTheme.Spacing.xSmall) {
+                        Text(type.displayName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(selectedType == type ? LociTheme.Colors.mainText : LociTheme.Colors.subheadText)
+                        
+                        Text(type.description)
+                            .font(.system(size: 11))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, LociTheme.Spacing.medium)
+                    .background(
+                        RoundedRectangle(cornerRadius: LociTheme.CornerRadius.medium)
+                            .fill(selectedType == type ? LociTheme.Colors.primaryAction.opacity(0.2) : Color.clear)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(4)
+        .background(LociTheme.Colors.disabledState.opacity(0.3))
+        .cornerRadius(LociTheme.CornerRadius.medium)
+    }
+}
+
+// MARK: - Scope Header
+
+struct ScopeHeader: View {
+    let scope: LocationScope
+    let type: LeaderboardType
+    @EnvironmentObject var leaderboardManager: LeaderboardManager
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.small) {
+            HStack {
+                Image(systemName: scope.icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scope.displayName)
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(LociTheme.Colors.mainText)
                     
-                    Spacer()
-                    
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 14))
-                        .foregroundColor(LociTheme.Colors.subheadText)
-                }
-                .padding(LociTheme.Spacing.medium)
-                .background(LociTheme.Colors.contentContainer)
-                .cornerRadius(LociTheme.CornerRadius.medium)
-            }
-            
-            if isExpanded {
-                ScrollView {
-                    LazyVStack(spacing: LociTheme.Spacing.xSmall) {
-                        ForEach(availableTypes.prefix(10), id: \.id) { type in
-                            TypeOptionRow(
-                                type: type,
-                                isSelected: type.id == selectedType.id
-                            ) {
-                                selectedType = type
-                                isExpanded = false
-                            }
-                        }
+                    if type == .artistMinutes, let artist = leaderboardManager.topArtist {
+                        Text("Top \(artist) listeners")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    } else {
+                        Text("Total listening time")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
                     }
                 }
-                .frame(maxHeight: 200)
-                .background(LociTheme.Colors.contentContainer)
-                .cornerRadius(LociTheme.CornerRadius.medium)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .top).combined(with: .opacity),
-                    removal: .move(edge: .top).combined(with: .opacity)
-                ))
-            }
-        }
-        .animation(LociTheme.Animation.smoothEaseInOut, value: isExpanded)
-    }
-}
-
-// MARK: - Type Option Row
-
-struct TypeOptionRow: View {
-    let type: LeaderboardType
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(type.displayName)
-                    .font(.system(size: 15))
-                    .foregroundColor(LociTheme.Colors.mainText)
                 
                 Spacer()
                 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                if let summary = leaderboardManager.userSummary,
+                   let bestRanking = summary.bestRanking,
+                   bestRanking.scope == scope && bestRanking.type == type {
+                    
+                    HStack(spacing: LociTheme.Spacing.xSmall) {
+                        Text("#\(bestRanking.rank)")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                        
+                        Text("YOU")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    }
+                    .padding(.horizontal, LociTheme.Spacing.small)
+                    .padding(.vertical, LociTheme.Spacing.xSmall)
+                    .background(LociTheme.Colors.secondaryHighlight.opacity(0.2))
+                    .cornerRadius(LociTheme.CornerRadius.small)
                 }
             }
-            .padding(.horizontal, LociTheme.Spacing.medium)
-            .padding(.vertical, LociTheme.Spacing.small)
-            .background(isSelected ? LociTheme.Colors.secondaryHighlight.opacity(0.1) : Color.clear)
-            .cornerRadius(LociTheme.CornerRadius.small)
         }
-        .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - User Quick Stats Row
-
-struct UserQuickStatsRow: View {
-    let summary: UserLeaderboardSummary
-    
-    var body: some View {
-        HStack(spacing: LociTheme.Spacing.medium) {
-            if let bestRanking = summary.bestRanking {
-                QuickStatItem(
-                    title: "Best Rank",
-                    value: "#\(bestRanking.rank)",
-                    subtitle: bestRanking.scope.displayName,
-                    color: LociTheme.Colors.secondaryHighlight
-                )
-            }
-            
-            QuickStatItem(
-                title: "Leaderboards",
-                value: "\(summary.availableLeaderboards.count)",
-                subtitle: "Active",
-                color: LociTheme.Colors.primaryAction
-            )
-            
-            if !summary.recentChanges.isEmpty {
-                let improvements = summary.recentChanges.filter { $0.isImprovement }.count
-                QuickStatItem(
-                    title: "This Week",
-                    value: "+\(improvements)",
-                    subtitle: "Improved",
-                    color: LociTheme.Colors.notificationBadge
-                )
-            }
-            
-            Spacer()
-        }
-    }
-}
-
-// MARK: - Quick Stat Item
-
-struct QuickStatItem: View {
-    let title: String
-    let value: String
-    let subtitle: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(LociTheme.Colors.subheadText)
-                .textCase(.uppercase)
-            
-            Text(value)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(color)
-            
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundColor(LociTheme.Colors.subheadText)
-        }
+        .padding(.horizontal, LociTheme.Spacing.medium)
+        .padding(.vertical, LociTheme.Spacing.small)
     }
 }
 
@@ -230,23 +117,21 @@ struct LeaderboardList: View {
     @EnvironmentObject var leaderboardManager: LeaderboardManager
     
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: LociTheme.Spacing.small) {
-                // Show user's entry if not in top 20
-                if let userEntry = leaderboard.userEntry,
-                   let userRank = leaderboard.userRank,
-                   userRank > 20 {
-                    
+        LazyVStack(spacing: LociTheme.Spacing.small) {
+            // Show user's entry if not in top 20
+            if let userEntry = leaderboard.userEntry,
+               let userRank = leaderboard.userRank,
+               userRank > 20 {
+                
+                VStack(spacing: LociTheme.Spacing.small) {
                     Text("Your Position")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(LociTheme.Colors.subheadText)
                         .textCase(.uppercase)
-                        .padding(.top, LociTheme.Spacing.medium)
                     
                     LeaderboardEntryCard(
                         entry: userEntry,
-                        isUserEntry: true,
-                        leaderboard: leaderboard
+                        isUserEntry: true
                     )
                     
                     Divider()
@@ -258,19 +143,19 @@ struct LeaderboardList: View {
                         .foregroundColor(LociTheme.Colors.subheadText)
                         .textCase(.uppercase)
                 }
-                
-                // Top entries
-                ForEach(leaderboard.entries) { entry in
-                    LeaderboardEntryCard(
-                        entry: entry,
-                        isUserEntry: entry.userId == (leaderboardManager.firebaseManager.currentUser?.id ?? "current-user"),
-                        leaderboard: leaderboard
-                    )
-                }
+                .padding(.horizontal, LociTheme.Spacing.medium)
             }
-            .padding(.horizontal, LociTheme.Spacing.medium)
-            .padding(.bottom, LociTheme.Spacing.xxLarge)
-        }
+            
+            // Top entries
+            ForEach(leaderboard.entries) { entry in
+                            LeaderboardEntryCard(
+                                entry: entry,
+                                isUserEntry: entry.userId == (FirebaseManager.shared.currentUser?.id ?? "current-user")
+                            )
+                            .padding(.horizontal, LociTheme.Spacing.medium)
+                        }
+                    }
+        .padding(.bottom, LociTheme.Spacing.xxLarge)
     }
 }
 
@@ -279,7 +164,6 @@ struct LeaderboardList: View {
 struct LeaderboardEntryCard: View {
     let entry: LeaderboardEntry
     let isUserEntry: Bool
-    let leaderboard: LeaderboardData
     
     var body: some View {
         HStack(spacing: LociTheme.Spacing.medium) {
@@ -287,26 +171,20 @@ struct LeaderboardEntryCard: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(rankBackgroundColor)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 36, height: 36)
                 
                 Text("\(entry.rank)")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundColor(rankTextColor)
             }
             
-            // Profile image placeholder
+            // Profile image
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [LociTheme.Colors.primaryAction, LociTheme.Colors.secondaryHighlight],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 40, height: 40)
+                .fill(profileGradient)
+                .frame(width: 44, height: 44)
                 .overlay(
                     Text(String(entry.username.prefix(1)))
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.white)
                 )
             
@@ -317,29 +195,26 @@ struct LeaderboardEntryCard: View {
                     .foregroundColor(LociTheme.Colors.mainText)
                 
                 HStack(spacing: LociTheme.Spacing.xSmall) {
-                    Text(entry.formattedScore)
-                        .font(.system(size: 14))
-                        .foregroundColor(LociTheme.Colors.subheadText)
+                    Text(entry.formattedMinutes)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
                     
-                    if case .artist(let artist) = leaderboard.type {
+                    if let artist = entry.artistName {
                         Text("• \(artist)")
                             .font(.system(size: 12))
-                            .foregroundColor(LociTheme.Colors.primaryAction)
-                    } else if case .genre(let genre) = leaderboard.type {
-                        Text("• \(genre)")
-                            .font(.system(size: 12))
-                            .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .lineLimit(1)
                     }
                 }
             }
             
             Spacer()
             
-            // Badge for top 3
+            // Crown for top 3
             if entry.rank <= 3 {
-                Image(systemName: badgeIcon)
+                Image(systemName: crownIcon)
                     .font(.system(size: 20))
-                    .foregroundColor(badgeColor)
+                    .foregroundColor(crownColor)
             }
         }
         .padding(LociTheme.Spacing.medium)
@@ -348,22 +223,21 @@ struct LeaderboardEntryCard: View {
                 .fill(cardBackgroundColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: LociTheme.CornerRadius.large)
-                        .stroke(cardBorderColor, lineWidth: isUserEntry ? 2 : 1)
-                        .shadow(
-                            color: isUserEntry ? LociTheme.Colors.secondaryHighlight.opacity(0.3) : .clear,
-                            radius: isUserEntry ? 8 : 0
-                        )
+                        .stroke(cardBorderColor, lineWidth: isUserEntry ? 2 : 0.5)
                 )
         )
         .scaleEffect(isUserEntry ? 1.02 : 1.0)
-        .animation(LociTheme.Animation.bouncy, value: isUserEntry)
+        .shadow(
+            color: isUserEntry ? LociTheme.Colors.secondaryHighlight.opacity(0.3) : .clear,
+            radius: isUserEntry ? 8 : 0
+        )
     }
     
     private var rankBackgroundColor: Color {
         switch entry.rank {
-        case 1: return Color.yellow
-        case 2: return Color.gray
-        case 3: return Color.orange
+        case 1: return .yellow
+        case 2: return .gray
+        case 3: return .orange
         default: return LociTheme.Colors.disabledState
         }
     }
@@ -372,7 +246,15 @@ struct LeaderboardEntryCard: View {
         entry.rank <= 3 ? LociTheme.Colors.appBackground : LociTheme.Colors.mainText
     }
     
-    private var badgeIcon: String {
+    private var profileGradient: LinearGradient {
+        LinearGradient(
+            colors: [LociTheme.Colors.primaryAction, LociTheme.Colors.secondaryHighlight],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    
+    private var crownIcon: String {
         switch entry.rank {
         case 1: return "crown.fill"
         case 2: return "medal.fill"
@@ -381,7 +263,7 @@ struct LeaderboardEntryCard: View {
         }
     }
     
-    private var badgeColor: Color {
+    private var crownColor: Color {
         switch entry.rank {
         case 1: return .yellow
         case 2: return .gray
@@ -426,7 +308,7 @@ struct EmptyLeaderboardView: View {
                     .font(LociTheme.Typography.subheading)
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("Start listening to see leaderboards for \(scope.displayName.lowercased())")
+                Text("Start listening to see \(scope.displayName.lowercased()) leaderboards")
                     .font(LociTheme.Typography.body)
                     .foregroundColor(LociTheme.Colors.subheadText)
                     .multilineTextAlignment(.center)
@@ -447,7 +329,7 @@ struct LoadingLeaderboardView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
                 .scaleEffect(1.5)
             
-            Text("Loading leaderboards...")
+            Text("Loading...")
                 .font(LociTheme.Typography.body)
                 .foregroundColor(LociTheme.Colors.subheadText)
             

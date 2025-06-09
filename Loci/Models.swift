@@ -743,20 +743,14 @@ class UserListeningData {
         }
     }
     
-    func getScore(for type: LeaderboardType, scoreType: ScoreType) -> Double {
+    func getScore(for type: LeaderboardType, artistName: String? = nil) -> Double {
         switch type {
-        case .overall:
-            return scoreType == .minutes ? totalMinutes : totalSongs
+        case .totalMinutes:
+            return totalMinutes
             
-        case .artist(let artistName):
-            return scoreType == .minutes ?
-                artistMinutes[artistName, default: 0] :
-                artistSongs[artistName, default: 0]
-                
-        case .genre(let genreName):
-            return scoreType == .minutes ?
-                genreMinutes[genreName, default: 0] :
-                genreSongs[genreName, default: 0]
+        case .artistMinutes:
+            guard let artist = artistName else { return 0 }
+            return artistMinutes[artist, default: 0]
         }
     }
 }

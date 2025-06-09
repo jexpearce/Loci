@@ -333,8 +333,8 @@ class DataStore: ObservableObject {
             result = getBuildingLeaderboardData(buildingName: context.building, type: type)
         case .region:
             result = getRegionalLeaderboardData(region: context.region, type: type)
-        case .state, .country, .global:
-            result = getGlobalLeaderboardData(type: type) // Would filter by state/country in production
+        case .global:
+            result = getGlobalLeaderboardData(type: type)
         }
         
         print("🔍 Returning \(result.count) user data entries")
