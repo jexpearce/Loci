@@ -927,6 +927,14 @@ struct SettingsView: View {
                 isOn: $privacyManager.privacySettings.showOnlineStatus
             )
             
+            // Top Items Visibility Setting
+            SettingsPickerRow(
+                icon: "music.note.list",
+                title: "Top Artists & Songs",
+                subtitle: "Who can see your top music",
+                selection: $privacyManager.privacySettings.topItemsVisibility
+            )
+            
             SettingsRow(
                 icon: "shield",
                 title: "Privacy Explanation",
@@ -3403,6 +3411,81 @@ struct SettingsToggleRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+}
+
+struct SettingsPickerRow<T: CaseIterable & RawRepresentable & Hashable>: View where T.RawValue == String {
+    let icon: String
+    let title: String
+    let subtitle: String
+    @Binding var selection: T
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .frame(width: 24)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text(subtitle)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                Text(selection.rawValue)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            
+            // Picker options
+            VStack(spacing: 8) {
+                ForEach(Array(T.allCases), id: \.self) { option in
+                    Button(action: { selection = option }) {
+                        HStack {
+                            Text(option.rawValue)
+                                .font(.system(size: 15))
+                                .foregroundColor(.white)
+                            
+                            Spacer()
+                            
+                            if selection == option {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(
+                            selection == option ? 
+                            Color.blue.opacity(0.2) :
+                            Color.clear
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                if let topItemsVisibility = selection as? TopItemsVisibility {
+                    Text(topItemsVisibility.description)
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+                }
+            }
+            .background(Color.white.opacity(0.05))
+        }
     }
 }
 

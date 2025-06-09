@@ -363,17 +363,21 @@ struct FriendProfileView: View {
                         }
                         .padding(.top, 40)
                         
+                        // Top Artists & Songs Section
+                        ProfileTopItemsView(userId: friend.id)
+                            .padding(.horizontal, 20)
+                        
                         // Actions
                         VStack(spacing: 16) {
                             Button(action: {
-                                // TODO: View friend's music activity
+                                // TODO: View friend's full music activity/session history
                             }) {
                                 HStack {
-                                    Image(systemName: "music.note")
+                                    Image(systemName: "clock.arrow.circlepath")
                                         .font(.system(size: 20, weight: .semibold))
                                         .foregroundColor(.blue)
                                     
-                                    Text("View Music Activity")
+                                    Text("View Session History")
                                         .font(.system(size: 18, weight: .medium))
                                         .foregroundColor(.white)
                                     

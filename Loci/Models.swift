@@ -461,6 +461,9 @@ struct PrivacySettings: Codable {
     var showOnlineStatus: Bool = true
     var defaultSessionPrivacy: SessionPrivacyLevel = .friends
     
+    // Top Artists/Songs privacy settings
+    var topItemsVisibility: TopItemsVisibility = .friends
+    
     // Data precision settings
     var locationPrecision: LocationPrecision = .building
     var timePrecision: TimePrecision = .minute
@@ -492,6 +495,23 @@ enum TimePrecision: String, Codable, CaseIterable {
     case minute = "Minute"
     case hour = "Hour"
     case day = "Day"
+}
+
+enum TopItemsVisibility: String, Codable, CaseIterable {
+    case everyone = "Everyone"
+    case friends = "Friends Only"
+    case nobody = "Private"
+    
+    var description: String {
+        switch self {
+        case .everyone:
+            return "Anyone can see your top artists and songs"
+        case .friends:
+            return "Only your friends can see your top artists and songs"
+        case .nobody:
+            return "Your top artists and songs are private"
+        }
+    }
 }
 
 struct MusicPreferences: Codable {

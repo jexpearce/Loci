@@ -149,7 +149,7 @@ struct UserProfileView: View {
                         quickStatsCard
                         
                         // Top Artists/Songs Section (Keep the one we just fixed)
-                        ProfileTopItemsView()
+                        ProfileTopItemsView() // No userId = current user
                             .padding(.horizontal, 20)
                         
                         // Enhanced Action Cards

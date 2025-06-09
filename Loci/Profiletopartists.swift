@@ -4,26 +4,69 @@ import Foundation
 // MARK: - Profile Top Artists/Songs Component
 
 struct ProfileTopItemsView: View {
+    let userId: String?
+    let isCurrentUser: Bool
+    
     @State private var selectedTab: ProfileTopTab = .artists
     @State private var timeRange: ProfileTimeRange = .thisWeek
     @StateObject private var viewModel = ProfileTopItemsViewModel()
+    @StateObject private var privacyManager = PrivacyManager.shared
+    @StateObject private var friendsManager = FriendsManager.shared
+    
+    init(userId: String? = nil) {
+        self.userId = userId
+        self.isCurrentUser = userId == nil
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            headerSection
-            tabSelector
-            contentSection
+        Group {
+            if canViewTopItems {
+                VStack(spacing: 16) {
+                    headerSection
+                    tabSelector
+                    contentSection
+                }
+                .padding(16)
+                .background(cardBackground)
+                .onChange(of: selectedTab) { _ in
+                    Task { await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange, userId: userId) }
+                }
+                .onChange(of: timeRange) { _ in
+                    Task { await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange, userId: userId) }
+                }
+                .task {
+                    await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange, userId: userId)
+                }
+            } else {
+                PrivateTopItemsView(relationshipStatus: relationshipStatus)
+            }
         }
-        .padding(16)
-        .background(cardBackground)
-        .onChange(of: selectedTab) { _ in
-            Task { await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange) }
+    }
+    
+    private var canViewTopItems: Bool {
+        // Current user can always see their own
+        if isCurrentUser { return true }
+        
+        // Check privacy settings
+        guard let userId = userId else { return false }
+        
+        switch privacyManager.privacySettings.topItemsVisibility {
+        case .everyone:
+            return true
+        case .friends:
+            return friendsManager.isFriend(userId: userId)
+        case .nobody:
+            return false
         }
-        .onChange(of: timeRange) { _ in
-            Task { await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange) }
-        }
-        .task {
-            await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange)
+    }
+    
+    private var relationshipStatus: String {
+        guard !isCurrentUser, let userId = userId else { return "" }
+        
+        if friendsManager.isFriend(userId: userId) {
+            return "This user has made their top artists and songs private."
+        } else {
+            return "Add this user as a friend to see their top artists and songs."
         }
     }
     
@@ -173,22 +216,22 @@ class ProfileTopItemsViewModel: ObservableObject {
     
     private let dataStore = DataStore.shared
     
-    func loadTopItems(tab: ProfileTopTab, timeRange: ProfileTimeRange) async {
+    func loadTopItems(tab: ProfileTopTab, timeRange: ProfileTimeRange, userId: String? = nil) async {
         isLoading = true
         
-        // Get sessions for time range
-        let sessions = getSessionsForTimeRange(timeRange)
+        // Get sessions for time range - either current user or specific user
+        let sessions = getSessionsForTimeRange(timeRange, userId: userId)
         
         if tab == .artists {
-            topArtists = calculateTopArtists(from: sessions)
+            topArtists = calculateTopArtists(from: sessions, userId: userId)
         } else {
-            topSongs = calculateTopSongs(from: sessions)
+            topSongs = calculateTopSongs(from: sessions, userId: userId)
         }
         
         isLoading = false
     }
     
-    private func getSessionsForTimeRange(_ range: ProfileTimeRange) -> [Session] {
+    private func getSessionsForTimeRange(_ range: ProfileTimeRange, userId: String? = nil) -> [Session] {
         let cutoffDate: Date
         
         switch range {
@@ -202,10 +245,17 @@ class ProfileTopItemsViewModel: ObservableObject {
             cutoffDate = Date.distantPast
         }
         
-        return dataStore.sessionHistory.filter { $0.startTime >= cutoffDate }
+        if let userId = userId {
+            // TODO: In a real implementation, you'd fetch this user's session data from Firebase
+            // For now, return empty array since we don't have other users' data locally
+            return []
+        } else {
+            // Current user's data
+            return dataStore.sessionHistory.filter { $0.startTime >= cutoffDate }
+        }
     }
     
-    private func calculateTopArtists(from sessions: [Session]) -> [ProfileTopItem] {
+    private func calculateTopArtists(from sessions: [Session], userId: String? = nil) -> [ProfileTopItem] {
         var artistCounts: [String: Int] = [:]
         
         // Count from sessions
@@ -215,10 +265,12 @@ class ProfileTopItemsViewModel: ObservableObject {
             }
         }
         
-        // Add import data
-        for batch in dataStore.importBatches {
-            for track in batch.tracks {
-                artistCounts[track.artist, default: 0] += 1
+        // Add import data (only for current user)
+        if userId == nil {
+            for batch in dataStore.importBatches {
+                for track in batch.tracks {
+                    artistCounts[track.artist, default: 0] += 1
+                }
             }
         }
         
@@ -236,7 +288,7 @@ class ProfileTopItemsViewModel: ObservableObject {
         }
     }
     
-    private func calculateTopSongs(from sessions: [Session]) -> [ProfileTopItem] {
+    private func calculateTopSongs(from sessions: [Session], userId: String? = nil) -> [ProfileTopItem] {
         var songData: [String: (artist: String, count: Int)] = [:]
         
         // Count from sessions
@@ -250,14 +302,16 @@ class ProfileTopItemsViewModel: ObservableObject {
             }
         }
         
-        // Add import data
-        for batch in dataStore.importBatches {
-            for track in batch.tracks {
-                let key = "\(track.name)___\(track.artist)"
-                if songData[key] == nil {
-                    songData[key] = (artist: track.artist, count: 0)
+        // Add import data (only for current user)
+        if userId == nil {
+            for batch in dataStore.importBatches {
+                for track in batch.tracks {
+                    let key = "\(track.name)___\(track.artist)"
+                    if songData[key] == nil {
+                        songData[key] = (artist: track.artist, count: 0)
+                    }
+                    songData[key]?.count += 1
                 }
-                songData[key]?.count += 1
             }
         }
         
@@ -307,4 +361,53 @@ struct ProfileTopItem: Identifiable {
     let name: String
     let subtitle: String?
     let playCount: Int
+}
+
+// MARK: - Private Top Items View
+
+struct PrivateTopItemsView: View {
+    let relationshipStatus: String
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Header
+            HStack {
+                Text("Top Artists & Songs")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Spacer()
+            }
+            
+            // Privacy message
+            VStack(spacing: 12) {
+                Image(systemName: "lock.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.gray)
+                
+                VStack(spacing: 8) {
+                    Text("Private Content")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text(relationshipStatus)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
 }
