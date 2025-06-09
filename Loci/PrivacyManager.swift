@@ -1,12 +1,18 @@
 import Foundation
 import CryptoKit
 
+// MARK: - Notification Names
+extension Notification.Name {
+    static let leaderboardPrivacyUpdated = Notification.Name("leaderboardPrivacyUpdated")
+}
+
 class PrivacyManager: ObservableObject {
     static let shared = PrivacyManager()
     
     // Privacy Settings
     @Published var privacySettings: PrivacySettings
     @Published var sharingPreferences: SharingPreferences
+    @Published var leaderboardPrivacySettings: LeaderboardPrivacySettings
     @Published var anonymousMode: Bool = true
     
     // User ID Management
@@ -19,6 +25,7 @@ class PrivacyManager: ObservableObject {
     private let userDefaults = UserDefaults.standard
     private let privacySettingsKey = "com.loci.privacySettings"
     private let sharingPreferencesKey = "com.loci.sharingPreferences"
+    private let leaderboardPrivacyKey = "com.loci.leaderboardPrivacy"
     
     private init() {
         // Initialize or load user IDs
@@ -31,6 +38,7 @@ class PrivacyManager: ObservableObject {
         // Load saved settings
         self.privacySettings = Self.loadPrivacySettings()
         self.sharingPreferences = Self.loadSharingPreferences()
+        self.leaderboardPrivacySettings = Self.loadLeaderboardPrivacySettings()
     }
     
     // MARK: - User ID Management
@@ -204,6 +212,14 @@ class PrivacyManager: ObservableObject {
         saveSharingPreferences()
     }
     
+    func updateLeaderboardPrivacySettings(_ settings: LeaderboardPrivacySettings) {
+        leaderboardPrivacySettings = settings
+        saveLeaderboardPrivacySettings()
+        
+        // Notify that leaderboard data needs updating
+        NotificationCenter.default.post(name: .leaderboardPrivacyUpdated, object: settings)
+    }
+    
     func blockUser(_ userID: String) {
         privacySettings.blockedUsers.insert(userID)
         savePrivacySettings()
@@ -251,8 +267,10 @@ class PrivacyManager: ObservableObject {
         // Reset settings to defaults
         privacySettings = PrivacySettings()
         sharingPreferences = SharingPreferences()
+        leaderboardPrivacySettings = LeaderboardPrivacySettings.default
         savePrivacySettings()
         saveSharingPreferences()
+        saveLeaderboardPrivacySettings()
     }
     
     // MARK: - Encryption
@@ -303,6 +321,20 @@ class PrivacyManager: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: "com.loci.sharingPreferences"),
               let decoded = try? JSONDecoder().decode(SharingPreferences.self, from: data) else {
             return SharingPreferences()
+        }
+        return decoded
+    }
+    
+    private func saveLeaderboardPrivacySettings() {
+        if let encoded = try? JSONEncoder().encode(leaderboardPrivacySettings) {
+            userDefaults.set(encoded, forKey: leaderboardPrivacyKey)
+        }
+    }
+    
+    private static func loadLeaderboardPrivacySettings() -> LeaderboardPrivacySettings {
+        guard let data = UserDefaults.standard.data(forKey: "com.loci.leaderboardPrivacy"),
+              let decoded = try? JSONDecoder().decode(LeaderboardPrivacySettings.self, from: data) else {
+            return LeaderboardPrivacySettings.default
         }
         return decoded
     }

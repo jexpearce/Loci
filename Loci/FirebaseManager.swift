@@ -21,7 +21,7 @@ class FirebaseManager: ObservableObject {
     @Published var isAppleSignInAvailable = false
     
     private let db = Firestore.firestore()
-    private let auth = Auth.auth()
+    let auth = Auth.auth()
     private var authStateListener: AuthStateDidChangeListenerHandle?
     private var cancellables = Set<AnyCancellable>()
     

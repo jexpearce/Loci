@@ -147,7 +147,7 @@ struct LeaderboardList: View {
             }
             
             // Top entries
-            ForEach(leaderboard.entries) { entry in
+                                    ForEach(leaderboard.entries) { entry in
                             LeaderboardEntryCard(
                                 entry: entry,
                                 isUserEntry: entry.userId == (FirebaseManager.shared.currentUser?.id ?? "current-user")
@@ -183,16 +183,32 @@ struct LeaderboardEntryCard: View {
                 .fill(profileGradient)
                 .frame(width: 44, height: 44)
                 .overlay(
-                    Text(String(entry.username.prefix(1)))
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                    Group {
+                        if entry.isAnonymous {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                        } else {
+                            Text(String(entry.displayName.prefix(1)))
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
                 )
             
             // User info
             VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
-                Text(entry.username)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(LociTheme.Colors.mainText)
+                HStack(spacing: LociTheme.Spacing.xSmall) {
+                    Text(entry.displayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    if entry.isAnonymous {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                    }
+                }
                 
                 HStack(spacing: LociTheme.Spacing.xSmall) {
                     Text(entry.formattedMinutes)
@@ -335,5 +351,204 @@ struct LoadingLeaderboardView: View {
             
             Spacer()
         }
+    }
+}
+
+// MARK: - Consent Required View
+
+struct LeaderboardConsentRequiredView: View {
+    let onShowConsent: () -> Void
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            Spacer()
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: 80, weight: .light))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    .glow(color: LociTheme.Colors.secondaryHighlight, radius: 16)
+                
+                VStack(spacing: LociTheme.Spacing.small) {
+                    Text("Join the Leaderboards")
+                        .font(LociTheme.Typography.heading)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .multilineTextAlignment(.center)
+                    
+                    Text("Compete with other music lovers in your area and around the world")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, LociTheme.Spacing.large)
+                }
+            }
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                ConsentFeaturePreview(
+                    icon: "building.2",
+                    title: "Building Rankings",
+                    description: "See who's listening in your building"
+                )
+                
+                ConsentFeaturePreview(
+                    icon: "map",
+                    title: "Regional Competition",
+                    description: "Compete with your neighborhood"
+                )
+                
+                ConsentFeaturePreview(
+                    icon: "globe",
+                    title: "Global Leaderboards",
+                    description: "Join music lovers worldwide"
+                )
+            }
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Button("Get Started") {
+                    onShowConsent()
+                }
+                .lociButton(.gradient, isFullWidth: true)
+                
+                Text("We'll ask for your privacy preferences first")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Spacer()
+        }
+        .padding(LociTheme.Spacing.large)
+    }
+}
+
+struct ConsentFeaturePreview: View {
+    let icon: String
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            ZStack {
+                Circle()
+                    .fill(LociTheme.Colors.secondaryHighlight.opacity(0.2))
+                    .frame(width: 40, height: 40)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            }
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, LociTheme.Spacing.medium)
+    }
+}
+
+// MARK: - Private Mode View
+
+struct LeaderboardPrivateModeView: View {
+    @Binding var privacySettings: LeaderboardPrivacySettings
+    let onChangeSettings: () -> Void
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            Spacer()
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 80, weight: .light))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                
+                VStack(spacing: LociTheme.Spacing.small) {
+                    Text("Private Mode")
+                        .font(LociTheme.Typography.heading)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Text("Your music data is completely private")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                PrivateModeFeature(
+                    icon: "eye.slash",
+                    title: "No Data Shared",
+                    description: "Your listening habits stay on your device"
+                )
+                
+                PrivateModeFeature(
+                    icon: "person.circle",
+                    title: "Complete Anonymity",
+                    description: "You don't appear on any leaderboards"
+                )
+                
+                PrivateModeFeature(
+                    icon: "gear",
+                    title: "Change Anytime",
+                    description: "You can join leaderboards whenever you want"
+                )
+            }
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Button("Change Privacy Settings") {
+                    onChangeSettings()
+                }
+                .lociButton(.primary, isFullWidth: true)
+                
+                Text("Join leaderboards to see how you compare with other music lovers")
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, LociTheme.Spacing.medium)
+            }
+            
+            Spacer()
+        }
+        .padding(LociTheme.Spacing.large)
+    }
+}
+
+struct PrivateModeFeature: View {
+    let icon: String
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(spacing: LociTheme.Spacing.medium) {
+            ZStack {
+                Circle()
+                    .fill(LociTheme.Colors.disabledState.opacity(0.3))
+                    .frame(width: 40, height: 40)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, LociTheme.Spacing.medium)
     }
 }

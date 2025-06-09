@@ -201,21 +201,6 @@ class NotificationManager: NSObject, ObservableObject {
         
         notificationCenter.add(request)
     }
-    func showImportSuccessNotification(trackCount: Int, location: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "Import Successful! 🎵"
-        content.body = "\(trackCount) tracks shared to \(location)"
-        content.sound = .default
-        
-        let request = UNNotificationRequest(
-            identifier: "import.success.\(UUID().uuidString)",
-            content: content,
-            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        )
-        
-        notificationCenter.add(request)
-    }
-    
     // MARK: - Match Notifications
     
     func notifyNewMatch(_ match: Match, userName: String? = nil) {
@@ -268,6 +253,56 @@ class NotificationManager: NSObject, ObservableObject {
         
         let request = UNNotificationRequest(
             identifier: "\(achievementPrefix).\(achievement.id)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        
+        notificationCenter.add(request)
+    }
+    
+    // MARK: - Leaderboard Notifications
+    
+    func showLeaderboardSyncNotification(privacyLevel: LeaderboardPrivacyLevel, scopes: [LocationScope]) {
+        guard isNotificationEnabled else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "Leaderboards Updated! 🏆"
+        
+        let scopeText = scopes.map { $0.displayName.lowercased() }.joined(separator: " & ")
+        let privacyText = privacyLevel.showsRealName ? "with your name" : "anonymously"
+        
+        content.body = "Your music data is now shared \(privacyText) on \(scopeText) leaderboards"
+        content.sound = .default
+        
+        content.userInfo = [
+            "type": "leaderboardSync",
+            "privacyLevel": privacyLevel.rawValue
+        ]
+        
+        let request = UNNotificationRequest(
+            identifier: "leaderboard.sync.\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false)
+        )
+        
+        notificationCenter.add(request)
+    }
+    
+    func showImportSuccessNotification(trackCount: Int, location: String) {
+        guard isNotificationEnabled else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "Import Complete! 📱"
+        content.body = "Added \(trackCount) tracks to \(location)"
+        content.sound = .default
+        
+        content.userInfo = [
+            "type": "importSuccess",
+            "trackCount": trackCount
+        ]
+        
+        let request = UNNotificationRequest(
+            identifier: "import.success.\(Date().timeIntervalSince1970)",
             content: content,
             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         )

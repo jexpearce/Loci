@@ -240,6 +240,9 @@ class DataStore: ObservableObject {
                 )
             )
             
+            // Trigger leaderboard data update
+            NotificationCenter.default.post(name: .leaderboardDataUpdated, object: nil)
+            
         } catch {
             print("❌ Failed to save session: \(error)")
         }

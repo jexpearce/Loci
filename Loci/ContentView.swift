@@ -98,6 +98,12 @@ struct ContentView: View {
                 showingLocationChangeAlert = true
             }
         }
+        .onAppear {
+            // Trigger initial leaderboard sync if user has consented
+            Task {
+                await LeaderboardManager.shared.autoSyncUserDataIfNeeded()
+            }
+        }
     }
 }
 // MARK: - Header View
@@ -817,6 +823,7 @@ struct SettingsView: View {
     @State private var showingDeleteAccountAlert = false
     @State private var showingPrivacyExplanation = false
     @State private var showingDataExportSheet = false
+    @State private var showingLeaderboardConsent = false
     @State private var notificationsEnabled = false
     
     var body: some View {
@@ -901,6 +908,14 @@ struct SettingsView: View {
     
     private var privacySection: some View {
         SettingsSection(title: "Privacy & Data") {
+            // Leaderboard Privacy
+            SettingsRow(
+                icon: "chart.bar.xaxis",
+                title: "Leaderboard Privacy",
+                subtitle: leaderboardPrivacySubtitle,
+                action: { showingLeaderboardConsent = true }
+            )
+            
             SettingsToggleRow(
                 icon: "location",
                 title: "Share Location",
@@ -1073,6 +1088,14 @@ struct SettingsView: View {
             DataExportView()
                 .environmentObject(dataStore)
         }
+        .sheet(isPresented: $showingLeaderboardConsent) {
+            LeaderboardConsentView(
+                isPresented: $showingLeaderboardConsent,
+                privacySettings: .constant(privacyManager.leaderboardPrivacySettings)
+            ) { settings in
+                privacyManager.updateLeaderboardPrivacySettings(settings)
+            }
+        }
     }
     
     private func checkNotificationStatus() {
@@ -1086,6 +1109,25 @@ struct SettingsView: View {
     private func openURL(_ urlString: String) {
         if let url = URL(string: urlString) {
             UIApplication.shared.open(url)
+        }
+    }
+    
+    private var leaderboardPrivacySubtitle: String {
+        let settings = privacyManager.leaderboardPrivacySettings
+        
+        if !settings.hasGivenConsent {
+            return "Not configured - tap to set up"
+        }
+        
+        switch settings.privacyLevel {
+        case .privateMode:
+            return "Private - no data shared"
+        case .anonymous:
+            return "Anonymous participation"
+        case .publicRegional:
+            return "Public in regional leaderboards only"
+        case .publicGlobal:
+            return "Public in all leaderboards"
         }
     }
 }

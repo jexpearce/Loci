@@ -2,8 +2,13 @@ import SwiftUI
 
 struct LeaderboardView: View {
     @StateObject private var leaderboardManager = LeaderboardManager.shared
+    @StateObject private var privacyManager = PrivacyManager.shared
+    @Environment(\.dismiss) var dismiss
+    
     @State private var selectedType: LeaderboardType = .totalMinutes
     @State private var currentScopeIndex = 1 // Start with Region (middle)
+    @State private var showingConsentFlow = false
+    @State private var leaderboardPrivacySettings = LeaderboardPrivacySettings.default
     
     private let scopes: [LocationScope] = [.building, .region, .global]
     
@@ -13,40 +18,93 @@ struct LeaderboardView: View {
                 LociTheme.Colors.appBackground
                     .ignoresSafeArea()
                 
-                VStack(spacing: 0) {
-                    // Header
-                    LeaderboardHeader()
-                    
-                    // Type Switcher
-                    LeaderboardTypeSwitcher(selectedType: $selectedType)
-                        .padding(.horizontal, LociTheme.Spacing.medium)
-                        .padding(.bottom, LociTheme.Spacing.medium)
-                    
-                    // Scope Indicator
-                    ScopeIndicator(scopes: scopes, currentIndex: currentScopeIndex)
-                        .padding(.bottom, LociTheme.Spacing.small)
-                    
-                    // Swipeable Leaderboards
-                    TabView(selection: $currentScopeIndex) {
-                        ForEach(0..<scopes.count, id: \.self) { index in
-                            LeaderboardPage(
-                                scope: scopes[index],
-                                type: selectedType
-                            )
-                            .tag(index)
-                        }
+                if !leaderboardPrivacySettings.hasGivenConsent {
+                    // Show consent required view
+                    LeaderboardConsentRequiredView {
+                        showingConsentFlow = true
                     }
-                    .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                } else if leaderboardPrivacySettings.privacyLevel == .privateMode {
+                    // Show private mode view
+                    LeaderboardPrivateModeView(
+                        privacySettings: $leaderboardPrivacySettings,
+                        onChangeSettings: { showingConsentFlow = true }
+                    )
+                } else {
+                    // Show actual leaderboards
+                    VStack(spacing: 0) {
+                        // Header
+                        LeaderboardHeader()
+                        
+                        // Type Switcher
+                        LeaderboardTypeSwitcher(selectedType: $selectedType)
+                            .padding(.horizontal, LociTheme.Spacing.medium)
+                            .padding(.bottom, LociTheme.Spacing.medium)
+                        
+                        // Scope Indicator
+                        ScopeIndicator(scopes: scopes, currentIndex: currentScopeIndex)
+                            .padding(.bottom, LociTheme.Spacing.small)
+                        
+                        // Swipeable Leaderboards
+                        TabView(selection: $currentScopeIndex) {
+                            ForEach(0..<scopes.count, id: \.self) { index in
+                                LeaderboardPage(
+                                    scope: scopes[index],
+                                    type: selectedType
+                                )
+                                .tag(index)
+                            }
+                        }
+                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                    }
                 }
             }
             .navigationBarHidden(true)
             .refreshable {
-                await leaderboardManager.loadLeaderboards(forceRefresh: true)
+                if leaderboardPrivacySettings.hasGivenConsent && leaderboardPrivacySettings.privacyLevel != .privateMode {
+                    await leaderboardManager.loadLeaderboards(forceRefresh: true)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+            }
+            .sheet(isPresented: $showingConsentFlow) {
+                LeaderboardConsentView(
+                    isPresented: $showingConsentFlow,
+                    privacySettings: $leaderboardPrivacySettings
+                ) { settings in
+                    handleConsentCompletion(settings)
+                }
             }
         }
         .onAppear {
+            loadPrivacySettings()
+            
+            if leaderboardPrivacySettings.hasGivenConsent && leaderboardPrivacySettings.privacyLevel != .privateMode {
+                Task {
+                    await leaderboardManager.loadLeaderboards()
+                }
+            }
+        }
+    }
+    
+    private func loadPrivacySettings() {
+        leaderboardPrivacySettings = privacyManager.leaderboardPrivacySettings
+    }
+    
+    private func handleConsentCompletion(_ settings: LeaderboardPrivacySettings) {
+        leaderboardPrivacySettings = settings
+        privacyManager.updateLeaderboardPrivacySettings(settings)
+        
+        // Trigger Firebase sync if user opted in
+        if settings.privacyLevel != .privateMode {
             Task {
-                await leaderboardManager.loadLeaderboards()
+                await leaderboardManager.syncUserDataToFirebase()
+                await leaderboardManager.loadLeaderboards(forceRefresh: true)
             }
         }
     }
