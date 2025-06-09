@@ -7,6 +7,7 @@ struct AuthenticationView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var displayName = ""
+    @State private var username = ""
     @State private var showingPasswordReset = false
     @State private var resetEmail = ""
     @State private var showingResetAlert = false
@@ -130,6 +131,21 @@ struct AuthenticationView: View {
                                         text: $displayName,
                                         icon: "person.fill"
                                     )
+                                }
+                                
+                                AuthTextField(
+                                    title: "Username",
+                                    text: $username,
+                                    icon: "at",
+                                    keyboardType: .asciiCapable
+                                )
+                                
+                                // Username validation helper text
+                                if !username.isEmpty && !isValidUsername(username) {
+                                    Text("Username must be 3-20 characters (letters, numbers, underscores only)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.red)
+                                        .padding(.horizontal)
                                 }
                                 
                                 AuthTextField(
@@ -257,9 +273,18 @@ struct AuthenticationView: View {
             return !email.isEmpty && 
                    !password.isEmpty && 
                    !displayName.isEmpty && 
+                   !username.isEmpty &&
+                   isValidUsername(username) &&
                    password == confirmPassword &&
                    password.count >= 6
         }
+    }
+    
+    private func isValidUsername(_ username: String) -> Bool {
+        // Username should be 3-20 characters, alphanumeric and underscores only
+        let regex = "^[a-zA-Z0-9_]{3,20}$"
+        let predicate = NSPredicate(format: "SELF MATCHES %@", regex)
+        return predicate.evaluate(with: username)
     }
     
     private func performAuth() {
@@ -269,7 +294,7 @@ struct AuthenticationView: View {
                 case .signIn:
                     try await firebaseManager.signIn(email: email, password: password)
                 case .signUp:
-                    try await firebaseManager.signUp(email: email, password: password, displayName: displayName)
+                    try await firebaseManager.signUp(email: email, password: password, displayName: displayName, username: username)
                 }
             } catch {
                 // Error is handled by FirebaseManager
@@ -282,6 +307,7 @@ struct AuthenticationView: View {
         password = ""
         confirmPassword = ""
         displayName = ""
+        username = ""
         firebaseManager.errorMessage = nil
     }
 }

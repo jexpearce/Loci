@@ -15,6 +15,10 @@ struct LociApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     @State private var hasCompletedOnboarding = false
+    @State private var showingImagePicker = false
+    @State private var showingAbout = false
+    @State private var profileImage: UIImage?
+    @State private var isUploadingImage = false
     
     init() {
         // Configure Firebase
@@ -112,6 +116,8 @@ struct MainAppView: View {
     }
 }
 
+// MARK: - Enhanced User Profile View with fixes
+
 struct UserProfileView: View {
     @EnvironmentObject var firebaseManager: FirebaseManager
     @EnvironmentObject var spotifyManager: SpotifyManager
@@ -123,7 +129,9 @@ struct UserProfileView: View {
     @State private var showingSettings = false
     @State private var showingImagePicker = false
     @State private var showingAbout = false
+    @State private var showingEditProfile = false
     @State private var profileImage: UIImage?
+    @State private var isUploadingImage = false
     
     var body: some View {
         NavigationView {
@@ -148,7 +156,7 @@ struct UserProfileView: View {
                         // Quick Stats Card
                         quickStatsCard
                         
-                        // Top Artists/Songs Section (Keep the one we just fixed)
+                        // Top Artists/Songs Section
                         ProfileTopItemsView() // No userId = current user
                             .padding(.horizontal, 20)
                         
@@ -178,6 +186,14 @@ struct UserProfileView: View {
         .sheet(isPresented: $showingImagePicker) {
             ImagePicker(image: $profileImage)
         }
+        .sheet(isPresented: $showingEditProfile) {
+            EditProfileView()
+                .environmentObject(firebaseManager)
+        }
+        .onChange(of: profileImage) { newImage in
+            guard let newImage = newImage else { return }
+            uploadProfileImage(newImage)
+        }
         .sheet(isPresented: $showingAbout) {
             AboutView()
         }
@@ -195,182 +211,195 @@ struct UserProfileView: View {
         }
     }
     
-    // MARK: - Profile Header Section
+    // MARK: - Profile Header Section (Fixed Layout)
     
     private var profileHeaderSection: some View {
-        VStack(spacing: 20) {
-            // Profile Picture with edit button
+        VStack(spacing: 24) {
+            // Profile Picture Container - Fixed Layout
             ZStack {
-                // Profile Image
-                Button(action: { showingImagePicker = true }) {
-                    ZStack {
-                        if let profileImage = profileImage {
-                            Image(uiImage: profileImage)
+                // Profile Picture
+                ZStack {
+                    // Background Circle
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.4, green: 0.2, blue: 0.8),
+                                    Color(red: 0.6, green: 0.3, blue: 0.9),
+                                    Color(red: 0.3, green: 0.7, blue: 1.0)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 120, height: 120)
+                    
+                    // Profile Image with better caching
+                    if let profileImage = profileImage {
+                        Image(uiImage: profileImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 120, height: 120)
+                            .clipShape(Circle())
+                    } else if let imageURL = firebaseManager.currentUser?.profileImageURL, !imageURL.isEmpty {
+                        CachedAsyncImage(url: URL(string: imageURL)) { image in
+                            image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
                                 .frame(width: 120, height: 120)
                                 .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.4, green: 0.2, blue: 0.8),
-                                            Color(red: 0.6, green: 0.3, blue: 0.9),
-                                            Color(red: 0.3, green: 0.7, blue: 1.0)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 120, height: 120)
-                                .overlay(
-                                    Circle()
-                                        .stroke(
-                                            LinearGradient(
-                                                colors: [Color.white.opacity(0.3), Color.clear],
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            ),
-                                            lineWidth: 2
-                                        )
-                                )
-                            
-                            if let user = firebaseManager.currentUser {
-                                Text(String(user.displayName.prefix(1)).uppercased())
-                                    .font(.system(size: 42, weight: .bold))
+                        } placeholder: {
+                            // Show user initials while loading
+                            if let displayName = firebaseManager.currentUser?.displayName {
+                                Text(String(displayName.prefix(1)).uppercased())
+                                    .font(.system(size: 48, weight: .bold))
                                     .foregroundColor(.white)
-                                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
                             } else {
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 42, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             }
                         }
-                        
-                        // Edit overlay
+                    } else {
+                        // Default avatar with user initials
+                        if let displayName = firebaseManager.currentUser?.displayName {
+                            Text(String(displayName.prefix(1)).uppercased())
+                                .font(.system(size: 48, weight: .bold))
+                                .foregroundColor(.white)
+                        } else {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 120))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    
+                    // Upload indicator overlay
+                    if isUploadingImage {
                         Circle()
-                            .fill(Color.black.opacity(0.4))
+                            .fill(Color.black.opacity(0.6))
                             .frame(width: 120, height: 120)
-                            .opacity(0)
                             .overlay(
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.white)
-                                    .opacity(0)
+                                VStack(spacing: 8) {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    Text("Uploading...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
                             )
                     }
                 }
                 
-                // Edit button
+                // Camera Button - Fixed positioning
                 VStack {
                     Spacer()
                     HStack {
                         Spacer()
                         Button(action: { showingImagePicker = true }) {
-                            Image(systemName: "camera.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(.white)
-                                .background(
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: 36, height: 36)
-                                )
-                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                            ZStack {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 36, height: 36)
+                                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                                
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
                         }
+                        .disabled(isUploadingImage)
                         .offset(x: -8, y: -8)
                     }
                 }
                 .frame(width: 120, height: 120)
             }
             
-            // User Info with enhanced styling
-            VStack(spacing: 8) {
-                Text(firebaseManager.currentUser?.displayName ?? "User")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                
-                Text(firebaseManager.currentUser?.email ?? "")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white.opacity(0.8))
-                
-                // Member since badge
-                if let user = firebaseManager.currentUser {
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 12))
-                        Text("Member since \(memberSinceText(user.joinedDate))")
-                            .font(.system(size: 14))
+            // User Info Section - Improved Layout
+            VStack(spacing: 16) {
+                VStack(spacing: 8) {
+                    if let user = firebaseManager.currentUser {
+                        Text(user.displayName)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("@\(user.username)")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                        
+                        Text("Member since \(DateFormatter.shortDate.string(from: user.joinedDate))")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                    } else {
+                        Text("Loading...")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.white)
                     }
-                    .foregroundColor(.white.opacity(0.7))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                }
+                
+                // Edit Profile Button
+                Button(action: { showingEditProfile = true }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Edit Profile")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                     .background(
-                        Capsule()
-                            .fill(Color.white.opacity(0.1))
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.2))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                            )
                     )
                 }
             }
         }
+        .padding(.horizontal, 20)
     }
     
     // MARK: - Quick Stats Card
     
     private var quickStatsCard: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Your Stats")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Button("View All") {
-                    showingSessionHistory = true
-                }
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.blue)
-            }
+        VStack(spacing: 20) {
+            Text("Your Music Stats")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
             
-                         HStack(spacing: 20) {
-                 ProfileStatItem(
-                     icon: "music.note",
-                     value: "\(totalTracks)",
-                     label: "Total Tracks",
-                     color: Color(red: 0.3, green: 0.7, blue: 1.0)
-                 )
-                 
-                 ProfileStatItem(
-                     icon: "clock.arrow.circlepath",
-                     value: "\(dataStore.sessionHistory.count)",
-                     label: "Sessions",
-                     color: Color(red: 0.6, green: 0.3, blue: 0.9)
-                 )
-                 
-                 ProfileStatItem(
-                     icon: "building.2",
-                     value: "\(uniqueLocations)",
-                     label: "Locations",
-                     color: Color(red: 1.0, green: 0.5, blue: 0.3)
-                 )
+            HStack(spacing: 20) {
+                ProfileStatItem(
+                    icon: "music.note",
+                    value: "\(totalTracks)",
+                    label: "Total Tracks",
+                    color: Color(red: 0.9, green: 0.3, blue: 0.6)
+                )
+                
+                ProfileStatItem(
+                    icon: "clock.arrow.circlepath",
+                    value: "\(dataStore.sessionHistory.count)",
+                    label: "Sessions",
+                    color: Color(red: 0.3, green: 0.7, blue: 1.0)
+                )
+                
+                ProfileStatItem(
+                    icon: "building.2",
+                    value: "\(uniqueLocations)",
+                    label: "Locations",
+                    color: Color(red: 0.9, green: 0.6, blue: 0.2)
+                )
             }
         }
-        .padding(20)
+        .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 20)
                 .fill(Color.white.opacity(0.1))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.3), Color.clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
                 )
         )
         .padding(.horizontal, 20)
@@ -380,57 +409,39 @@ struct UserProfileView: View {
     
     private var actionCardsSection: some View {
         VStack(spacing: 16) {
-            HStack {
-                Text("Quick Actions")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Spacer()
-            }
-            .padding(.horizontal, 20)
+            Text("Your Activity")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
             
             VStack(spacing: 12) {
                 EnhancedProfileCard(
                     icon: "clock.arrow.circlepath",
                     title: "Session History",
-                    subtitle: "View your \(dataStore.sessionHistory.count) listening sessions",
+                    subtitle: "View your listening sessions",
                     iconColor: Color(red: 0.3, green: 0.7, blue: 1.0),
-                    hasData: !dataStore.sessionHistory.isEmpty
-                ) {
-                    showingSessionHistory = true
-                }
+                    hasData: !dataStore.sessionHistory.isEmpty,
+                    action: { showingSessionHistory = true }
+                )
                 
                 EnhancedProfileCard(
-                    icon: "music.note",
-                    title: "Music Preferences",
-                    subtitle: spotifyManager.isAuthenticated ? "Connected to Spotify" : "Connect Spotify account",
-                    iconColor: Color(red: 0.11, green: 0.73, blue: 0.33),
-                    hasData: spotifyManager.isAuthenticated
-                ) {
-                    if !spotifyManager.isAuthenticated {
-                        spotifyManager.startAuthorization()
-                    }
-                }
+                    icon: "square.and.arrow.down",
+                    title: "Spotify Imports",
+                    subtitle: "Music you've shared",
+                    iconColor: Color(red: 0.9, green: 0.3, blue: 0.6),
+                    hasData: !dataStore.importBatches.isEmpty,
+                    action: { /* Show imports */ }
+                )
                 
                 EnhancedProfileCard(
-                    icon: "lock.shield",
-                    title: "Privacy & Settings",
-                    subtitle: "Manage your data and privacy preferences",
-                    iconColor: Color(red: 0.6, green: 0.3, blue: 0.9),
-                    hasData: true
-                ) {
-                    showingSettings = true
-                }
-                
-                EnhancedProfileCard(
-                    icon: "info.circle",
-                    title: "About Loci",
-                    subtitle: "Learn more about the app",
-                    iconColor: Color(red: 1.0, green: 0.5, blue: 0.3),
-                    hasData: true
-                ) {
-                    showingAbout = true
-                }
+                    icon: "chart.bar.xaxis",
+                    title: "Analytics",
+                    subtitle: "Your listening insights",
+                    iconColor: Color(red: 0.9, green: 0.6, blue: 0.2),
+                    hasData: totalTracks > 0,
+                    action: { /* Show analytics */ }
+                )
             }
             .padding(.horizontal, 20)
         }
@@ -440,47 +451,120 @@ struct UserProfileView: View {
     
     private var accountManagementSection: some View {
         VStack(spacing: 16) {
-            HStack {
-                Text("Account")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                
-                Spacer()
-            }
-            .padding(.horizontal, 20)
+            Text("Account")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
             
-            // Sign out button with better styling
-            Button(action: { showingSignOutAlert = true }) {
-                HStack(spacing: 12) {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                        .font(.system(size: 18, weight: .semibold))
-                    
-                    Text("Sign Out")
-                        .font(.system(size: 18, weight: .semibold))
-                    
-                    Spacer()
-                }
-                .foregroundColor(.red)
-                .padding(20)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.red.opacity(0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                        )
+            VStack(spacing: 12) {
+                EnhancedProfileCard(
+                    icon: "gearshape",
+                    title: "Settings",
+                    subtitle: "Privacy & preferences",
+                    iconColor: .gray,
+                    hasData: true,
+                    action: { showingSettings = true }
                 )
+                
+                EnhancedProfileCard(
+                    icon: "info.circle",
+                    title: "About Loci",
+                    subtitle: "App info & support",
+                    iconColor: .blue,
+                    hasData: true,
+                    action: { showingAbout = true }
+                )
+                
+                Button(action: { showingSignOutAlert = true }) {
+                    HStack(spacing: 16) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.red.opacity(0.2))
+                                .frame(width: 50, height: 50)
+                            
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(.red)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Sign Out")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.red)
+                            
+                            Text("Sign out of your account")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.white.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 20)
         }
     }
     
-    // MARK: - Helper Functions
+    // MARK: - Helper Methods
     
-    private func memberSinceText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM yyyy"
-        return formatter.string(from: date)
+    private func uploadProfileImage(_ image: UIImage) {
+        isUploadingImage = true
+        
+        Task {
+            do {
+                // Compress image to reasonable size (max 1MB)
+                guard let imageData = compressImage(image, maxSizeKB: 1024) else {
+                    await MainActor.run {
+                        isUploadingImage = false
+                    }
+                    return
+                }
+                
+                // Upload to Firebase Storage
+                let _ = try await firebaseManager.uploadProfilePicture(imageData)
+                
+                await MainActor.run {
+                    isUploadingImage = false
+                    // Clear the local profile image so it reloads from Firebase
+                    profileImage = nil
+                }
+            } catch {
+                await MainActor.run {
+                    isUploadingImage = false
+                    print("Error uploading profile image: \(error)")
+                    // Could show an alert here
+                }
+            }
+        }
+    }
+    
+    private func compressImage(_ image: UIImage, maxSizeKB: Int) -> Data? {
+        let maxBytes = maxSizeKB * 1024
+        var compression: CGFloat = 1.0
+        var imageData = image.jpegData(compressionQuality: compression)
+        
+        // Reduce quality until under size limit
+        while let data = imageData, data.count > maxBytes && compression > 0.1 {
+            compression -= 0.1
+            imageData = image.jpegData(compressionQuality: compression)
+        }
+        
+        return imageData
     }
     
     private var totalTracks: Int {
@@ -495,6 +579,326 @@ struct UserProfileView: View {
         })
         let importLocations = Set(dataStore.importBatches.map { $0.location })
         return Set(sessionLocations).union(importLocations).count
+    }
+}
+
+// MARK: - Enhanced Cached Async Image for better persistence
+
+struct CachedAsyncImage<Content, Placeholder>: View where Content: View, Placeholder: View {
+    private let url: URL?
+    private let content: (Image) -> Content
+    private let placeholder: () -> Placeholder
+    
+    @State private var cachedImage: UIImage?
+    @State private var isLoading = false
+    
+    init(
+        url: URL?,
+        @ViewBuilder content: @escaping (Image) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.url = url
+        self.content = content
+        self.placeholder = placeholder
+    }
+    
+    var body: some View {
+        Group {
+            if let cachedImage = cachedImage {
+                content(Image(uiImage: cachedImage))
+            } else if isLoading {
+                placeholder()
+            } else {
+                placeholder()
+                    .onAppear {
+                        loadImage()
+                    }
+            }
+        }
+    }
+    
+    private func loadImage() {
+        guard let url = url, cachedImage == nil, !isLoading else { return }
+        
+        isLoading = true
+        
+        // Check cache first
+        if let cachedData = ImageCache.shared.image(for: url.absoluteString) {
+            self.cachedImage = cachedData
+            self.isLoading = false
+            return
+        }
+        
+        // Download image
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, let image = UIImage(data: data) else {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                }
+                return
+            }
+            
+            // Cache the image
+            ImageCache.shared.setImage(image, for: url.absoluteString)
+            
+            DispatchQueue.main.async {
+                self.cachedImage = image
+                self.isLoading = false
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Simple Image Cache
+
+class ImageCache {
+    static let shared = ImageCache()
+    private let cache = NSCache<NSString, UIImage>()
+    
+    private init() {
+        cache.countLimit = 100
+        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB
+    }
+    
+    func setImage(_ image: UIImage, for key: String) {
+        cache.setObject(image, forKey: NSString(string: key))
+    }
+    
+    func image(for key: String) -> UIImage? {
+        return cache.object(forKey: NSString(string: key))
+    }
+    
+    func removeImage(for key: String) {
+        cache.removeObject(forKey: NSString(string: key))
+    }
+    
+    func clearCache() {
+        cache.removeAllObjects()
+    }
+}
+
+// MARK: - Edit Profile View
+
+struct EditProfileView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var firebaseManager: FirebaseManager
+    
+    @State private var displayName = ""
+    @State private var username = ""
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var successMessage: String?
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.05, green: 0.05, blue: 0.15),
+                        Color(red: 0.08, green: 0.05, blue: 0.2),
+                        Color(red: 0.12, green: 0.08, blue: 0.25)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Header
+                        VStack(spacing: 16) {
+                            Image(systemName: "person.circle")
+                                .font(.system(size: 64))
+                                .foregroundColor(.white.opacity(0.8))
+                            
+                            Text("Edit Profile")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.top, 40)
+                        
+                        // Form
+                        VStack(spacing: 24) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Display Name")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                
+                                TextField("", text: $displayName)
+                                    .textFieldStyle(EditProfileTextFieldStyle())
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Username")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                
+                                HStack {
+                                    Text("@")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(.leading, 16)
+                                    
+                                    TextField("", text: $username)
+                                        .textFieldStyle(PlainTextFieldStyle())
+                                        .autocapitalization(.none)
+                                        .foregroundColor(.white)
+                                        .padding(.vertical, 16)
+                                        .padding(.trailing, 16)
+                                }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.white.opacity(0.1))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                        )
+                                )
+                                
+                                if !username.isEmpty && !isValidUsername(username) {
+                                    Text("Username must be 3-20 characters (letters, numbers, underscores only)")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            
+                            // Messages
+                            if let errorMessage = errorMessage {
+                                Text(errorMessage)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.red)
+                                    .multilineTextAlignment(.center)
+                            }
+                            
+                            if let successMessage = successMessage {
+                                Text(successMessage)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.green)
+                                    .multilineTextAlignment(.center)
+                            }
+                            
+                            // Save Button
+                            Button(action: saveProfile) {
+                                HStack {
+                                    if isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Text("Save Changes")
+                                            .font(.system(size: 18, weight: .semibold))
+                                    }
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.purple, Color.blue],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(16)
+                            }
+                            .disabled(isLoading || !isFormValid)
+                            .opacity(isLoading || !isFormValid ? 0.6 : 1.0)
+                        }
+                        .padding(.horizontal, 32)
+                        
+                        Spacer(minLength: 40)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+        .onAppear {
+            loadCurrentUserData()
+        }
+    }
+    
+    private var isFormValid: Bool {
+        !displayName.isEmpty && !username.isEmpty && isValidUsername(username)
+    }
+    
+    private func isValidUsername(_ username: String) -> Bool {
+        let regex = "^[a-zA-Z0-9_]{3,20}$"
+        let predicate = NSPredicate(format: "SELF MATCHES %@", regex)
+        return predicate.evaluate(with: username)
+    }
+    
+    private func loadCurrentUserData() {
+        if let user = firebaseManager.currentUser {
+            displayName = user.displayName
+            username = user.username
+        }
+    }
+    
+    private func saveProfile() {
+        isLoading = true
+        errorMessage = nil
+        successMessage = nil
+        
+        Task {
+            do {
+                // Check if username is taken (if changed)
+                if username.lowercased() != firebaseManager.currentUser?.username.lowercased() {
+                    try await checkUsernameAvailability()
+                }
+                
+                // Update profile
+                let updates: [String: Any] = [
+                    "displayName": displayName,
+                    "username": username.lowercased()
+                ]
+                
+                try await firebaseManager.updateUserProfile(updates)
+                
+                await MainActor.run {
+                    isLoading = false
+                    successMessage = "Profile updated successfully!"
+                    
+                    // Dismiss after a short delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismiss()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+    
+    private func checkUsernameAvailability() async throws {
+        try await firebaseManager.checkUsernameAvailability(username: username, excludeCurrentUser: true)
+    }
+}
+
+struct EditProfileTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .foregroundColor(.white)
     }
 }
 

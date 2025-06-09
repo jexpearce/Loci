@@ -68,13 +68,14 @@ class DataStore: ObservableObject {
 
     private init() {
         self.container = try! ModelContainer(
-            for: Session.self, ListeningEvent.self, BuildingChange.self
+            for: Session.self, ListeningEvent.self, BuildingChange.self, ImportBatchEntity.self
         )
         
         fetchSessionHistory()
         loadActiveOnePlaceSession()
         loadDesignatedLocation()
         loadImportedTrackIds()
+        loadImportBatches()
     }
 
     // MARK: - Current Session Management
@@ -342,25 +343,27 @@ class DataStore: ObservableObject {
     }
 
     private func getBuildingLeaderboardData(buildingName: String?, type: LeaderboardType) -> [UserListeningData] {
-        guard let building = buildingName else { return [] }
-        
-        // Get all sessions for this building
-        let buildingSessions = sessionHistory.filter { session in
-            session.events.contains { $0.buildingName == building }
-        }
-        
-        // Get all import batches for this building
-        let buildingImports = importBatches.filter { $0.location == building && $0.assignmentType == .building }
+        // For building leaderboards, be permissive and include all data for now
+        // In production, this would use proper building boundaries
+        let buildingSessions = sessionHistory
+        let buildingImports = importBatches.filter { $0.assignmentType == .building }
         
         return aggregateUserData(sessions: buildingSessions, imports: buildingImports, type: type)
     }
 
     private func getRegionalLeaderboardData(region: String?, type: LeaderboardType) -> [UserListeningData] {
-        // For now, use all sessions as regional data
-        // In production, you'd filter by actual geographic region
-        let regionalSessions = sessionHistory
+        
+        // Filter sessions by geographic proximity (within ~25km)
+        let regionalSessions = sessionHistory.filter { session in
+            // For now, without coordinate data in sessions, we'll use a simpler check
+            // In production, you'd store coordinates in sessions and do proper geographic filtering
+            return true // TODO: Implement coordinate-based filtering when session coordinates are available
+        }
+        
+        // For regional leaderboards, include all regional imports for now
         let regionalImports = importBatches.filter { $0.assignmentType == .region }
         
+        print("🔍 Regional filtering: \(regionalSessions.count) sessions, \(regionalImports.count) imports for region: \(region)")
         return aggregateUserData(sessions: regionalSessions, imports: regionalImports, type: type)
     }
 
@@ -469,10 +472,42 @@ class DataStore: ObservableObject {
         return filterNewTracks(tracks).count
     }
     
+    func isTrackAlreadyImported(_ trackId: String) -> Bool {
+        return importedTrackIds.contains(trackId)
+    }
+    
     private func loadImportedTrackIds() {
         if let savedIds = UserDefaults.standard.array(forKey: "importedTrackIds") as? [String] {
             importedTrackIds = Set(savedIds)
             print("✅ Loaded \(importedTrackIds.count) imported track IDs")
+        }
+    }
+    
+    private func loadImportBatches() {
+        do {
+            let descriptor = FetchDescriptor<ImportBatchEntity>(sortBy: [SortDescriptor(\.importedAt, order: .reverse)])
+            let entities = try container.mainContext.fetch(descriptor)
+            
+            importBatches = entities.map { entity in
+                ImportBatch(
+                    id: entity.id,
+                    tracks: entity.tracks,
+                    location: entity.location,
+                    assignmentType: entity.assignmentType,
+                    importedAt: entity.importedAt
+                )
+            }
+            
+            print("✅ Loaded \(importBatches.count) import batches from Core Data")
+            
+            // Update SpotifyManager state if needed
+            DispatchQueue.main.async {
+                SpotifyManager.shared.hasRecentImports = !self.importBatches.isEmpty
+            }
+            
+        } catch {
+            print("❌ Failed to load import batches: \(error)")
+            importBatches = []
         }
     }
 

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4253542A2DF74BF700F2C790 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 425354292DF74BF700F2C790 /* FirebaseStorage */; };
 		42E4F8982DEBC54D00EAAB0C /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 42E4F8972DEBC54D00EAAB0C /* FirebaseAuth */; };
 		42E4F89A2DEBC54D00EAAB0C /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 42E4F8992DEBC54D00EAAB0C /* FirebaseCore */; };
 		42E4F89C2DEBC54D00EAAB0C /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 42E4F89B2DEBC54D00EAAB0C /* FirebaseFirestore */; };
@@ -75,6 +76,7 @@
 				42E4F89A2DEBC54D00EAAB0C /* FirebaseCore in Frameworks */,
 				42E4F8982DEBC54D00EAAB0C /* FirebaseAuth in Frameworks */,
 				42E4F89C2DEBC54D00EAAB0C /* FirebaseFirestore in Frameworks */,
+				4253542A2DF74BF700F2C790 /* FirebaseStorage in Frameworks */,
 				42E4F89E2DEBC54D00EAAB0C /* FirebaseFunctions in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -140,6 +142,7 @@
 				42E4F8992DEBC54D00EAAB0C /* FirebaseCore */,
 				42E4F89B2DEBC54D00EAAB0C /* FirebaseFirestore */,
 				42E4F89D2DEBC54D00EAAB0C /* FirebaseFunctions */,
+				425354292DF74BF700F2C790 /* FirebaseStorage */,
 			);
 			productName = Loci;
 			productReference = 428412E22DE9FF2D00DCDB90 /* Loci.app */;
@@ -633,6 +636,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		425354292DF74BF700F2C790 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 42E4F8962DEBC54D00EAAB0C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
 		42E4F8972DEBC54D00EAAB0C /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 42E4F8962DEBC54D00EAAB0C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

@@ -323,7 +323,8 @@ class SpotifyManager: NSObject, ObservableObject {
                 artist: recentTrack.track.artist,
                 album: recentTrack.track.album,
                 playedAt: recentTrack.playedAt,
-                imageURL: recentTrack.track.imageURL
+                imageURL: recentTrack.track.imageURL,
+                durationMs: recentTrack.track.durationMs
             )
         }
     }

@@ -255,6 +255,18 @@ class FriendsManager: ObservableObject {
         return try Firestore.Decoder().decode(UserProfile.self, from: document.data())
     }
     
+    func searchUsersByUsername(username: String) async throws -> UserProfile? {
+        let cleanUsername = username.replacingOccurrences(of: "@", with: "").lowercased()
+        
+        let snapshot = try await db.collection("users")
+            .whereField("username", isEqualTo: cleanUsername)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else { return nil }
+        return try Firestore.Decoder().decode(UserProfile.self, from: document.data())
+    }
+    
     // MARK: - Friend Activity
     
     func getFriendActivity() async throws -> [FriendActivity] {

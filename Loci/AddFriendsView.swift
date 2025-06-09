@@ -10,11 +10,13 @@ struct AddFriendsView: View {
     
     enum SearchType: String, CaseIterable {
         case displayName = "Name"
+        case username = "Username"
         case email = "Email"
         
         var placeholder: String {
             switch self {
             case .displayName: return "Search by name..."
+            case .username: return "Search by @username..."
             case .email: return "Search by email..."
             }
         }
@@ -194,6 +196,12 @@ struct AddFriendsView: View {
                 switch selectedSearchType {
                 case .displayName:
                     results = try await friendsManager.searchUsers(query: query)
+                case .username:
+                    if let user = try await friendsManager.searchUsersByUsername(username: query) {
+                        results = [user]
+                    } else {
+                        results = []
+                    }
                 case .email:
                     if let user = try await friendsManager.searchUsersByEmail(email: query) {
                         results = [user]
@@ -268,6 +276,10 @@ struct UserSearchResultView: View {
                 Text(user.displayName)
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
+                
+                Text("@\(user.username)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
                 
                 Text(user.email ?? "No email")
                     .font(.system(size: 14, weight: .medium))

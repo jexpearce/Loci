@@ -266,6 +266,7 @@ struct OnePlaceActiveDashboard: View {
 
 
 // MARK: - Active Session View
+
 struct ActiveSessionView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var dataStore: DataStore
@@ -323,6 +324,7 @@ struct FeatureRow: View {
 
 
 // MARK: - Live Indicator Dot
+
 struct SessionModeBadge: View {
     let mode: SessionMode
     
@@ -872,7 +874,7 @@ struct SettingsView: View {
             SettingsRow(
                 icon: "person.circle",
                 title: "Account Info",
-                subtitle: firebaseManager.currentUser?.email ?? "Not signed in",
+                subtitle: "\(firebaseManager.currentUser?.username ?? ""), \(firebaseManager.currentUser?.email ?? "Not signed in")",
                 action: {}
             )
             
@@ -2536,9 +2538,7 @@ struct SpotifyImportMainView: View {
             )
             
             // Quick Stats / Recent Activity Preview
-            if spotifyManager.hasRecentImports {
-                RecentImportPreviewCard()
-            }
+            RecentImportPreviewCard()
             
             // Regional Discovery Teaser
             RegionalDiscoveryTeaser(region: currentRegion)
@@ -2555,6 +2555,8 @@ struct SpotifyImportHeroCard: View {
     @EnvironmentObject var spotifyManager: SpotifyManager
     @EnvironmentObject var locationManager: LocationManager
     @EnvironmentObject var dataStore: DataStore
+    
+    @State private var showingStreamlinedImport = false
     
     private var locationDisplayText: String {
         dataStore.designatedLocation?.displayName ?? region
@@ -2584,7 +2586,13 @@ struct SpotifyImportHeroCard: View {
             // Import Button
             Button(action: { 
                 if spotifyManager.isAuthenticated {
-                    showingImportSheet = true
+                    if dataStore.designatedLocation != nil {
+                        // Use streamlined import when location is known
+                        showingStreamlinedImport = true
+                    } else {
+                        // Use full import flow when location needs to be selected
+                        showingImportSheet = true
+                    }
                 } else {
                     spotifyManager.startAuthorization()
                 }
@@ -2594,10 +2602,10 @@ struct SpotifyImportHeroCard: View {
                         .font(.system(size: 24))
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Import Recent Plays")
+                        Text(dataStore.designatedLocation != nil ? "Quick Import" : "Import Recent Plays")
                             .font(.system(size: 18, weight: .semibold))
                         
-                        Text("Your last 50 tracks from Spotify")
+                        Text(dataStore.designatedLocation != nil ? "Import to \(dataStore.designatedLocation?.displayName ?? "your location")" : "Your last 50 tracks from Spotify")
                             .font(.system(size: 14))
                             .opacity(0.8)
                     }
@@ -2645,6 +2653,12 @@ struct SpotifyImportHeroCard: View {
                 .environmentObject(dataStore)
                 .environmentObject(ReverseGeocoding.shared)
         }
+        .sheet(isPresented: $showingStreamlinedImport) {
+            StreamlinedSpotifyImportView()
+                .environmentObject(spotifyManager)
+                .environmentObject(dataStore)
+                .environmentObject(locationManager)
+        }
     }
 }
 
@@ -2652,6 +2666,7 @@ struct SpotifyImportHeroCard: View {
 
 struct RecentImportPreviewCard: View {
     @EnvironmentObject var dataStore: DataStore
+    @State private var showingImportHistory = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: LociTheme.Spacing.medium) {
@@ -2663,28 +2678,36 @@ struct RecentImportPreviewCard: View {
                 Spacer()
                 
                 Button("View All") {
-                    // TODO: Navigate to full import history
+                    showingImportHistory = true
                 }
                 .font(.system(size: 14))
                 .foregroundColor(LociTheme.Colors.secondaryHighlight)
             }
             
             if let recentImport = dataStore.importBatches.last {
-                RecentImportRow(importBatch: recentImport)
+                RecentImportRow(importBatch: recentImport) {
+                    showingImportHistory = true
+                }
             } else {
                 EmptyImportPreview()
             }
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+        .sheet(isPresented: $showingImportHistory) {
+            ImportHistoryView()
+                .environmentObject(dataStore)
+        }
     }
 }
 
 struct RecentImportRow: View {
     let importBatch: ImportBatch
+    let onTap: () -> Void
     
     var body: some View {
-        HStack(spacing: LociTheme.Spacing.medium) {
+        Button(action: onTap) {
+            HStack(spacing: LociTheme.Spacing.medium) {
             // Import icon
             ZStack {
                 Circle()
@@ -2742,6 +2765,8 @@ struct RecentImportRow: View {
                 .font(.system(size: 12))
                 .foregroundColor(LociTheme.Colors.subheadText)
         }
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     private func timeAgo(from date: Date) -> String {
@@ -3801,5 +3826,496 @@ struct DataExportRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.white.opacity(0.1))
         )
+    }
+}
+
+// MARK: - Streamlined Spotify Import View
+
+struct StreamlinedSpotifyImportView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var dataStore: DataStore
+    @EnvironmentObject var locationManager: LocationManager
+    
+    @State private var isLoading = false
+    @State private var recentTracks: [SpotifyImportTrack] = []
+    @State private var selectedTracks: Set<String> = []
+    @State private var errorMessage: String?
+    @State private var importStep: StreamlinedImportStep = .loading
+    @State private var allTracksCount: Int?
+    @State private var showingSuccessMessage = false
+    
+    enum StreamlinedImportStep {
+        case loading
+        case trackSelection
+        case importing
+        case success
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LociTheme.Colors.appBackground
+                    .ignoresSafeArea()
+                
+                switch importStep {
+                case .loading:
+                    LoadingView()
+                case .trackSelection:
+                    TrackSelectionView()
+                case .importing:
+                    ImportingView()
+                case .success:
+                    SuccessView()
+                }
+            }
+            .navigationTitle("Quick Import")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+                
+                if importStep == .trackSelection {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Import") {
+                            performImport()
+                        }
+                        .disabled(selectedTracks.isEmpty)
+                        .foregroundColor(selectedTracks.isEmpty ? LociTheme.Colors.disabledState : LociTheme.Colors.secondaryHighlight)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            loadRecentTracks()
+        }
+    }
+    
+    // MARK: - Loading View
+    
+    @ViewBuilder
+    func LoadingView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
+                .scaleEffect(1.5)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Fetching Your Recent Plays")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Finding new tracks to share")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+        }
+    }
+    
+    // MARK: - Track Selection View
+    
+    @ViewBuilder
+    func TrackSelectionView() -> some View {
+        VStack(spacing: LociTheme.Spacing.medium) {
+            // Header with location info
+            VStack(spacing: LociTheme.Spacing.small) {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sharing to")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        
+                        Text(dataStore.designatedLocation?.displayName ?? "Unknown Location")
+                            .font(LociTheme.Typography.body)
+                            .foregroundColor(LociTheme.Colors.mainText)
+                            .fontWeight(.medium)
+                    }
+                    
+                    Spacer()
+                }
+                
+                // Show info about filtered tracks if any were removed
+                if let allTracksCount = allTracksCount, allTracksCount > recentTracks.count {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        
+                        Text("Showing \(recentTracks.count) new tracks (filtered out \(allTracksCount - recentTracks.count) already imported)")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        
+                        Spacer()
+                    }
+                }
+                
+                HStack {
+                    Button(selectedTracks.count == recentTracks.count ? "Deselect All" : "Select All") {
+                        if selectedTracks.count == recentTracks.count {
+                            selectedTracks.removeAll()
+                        } else {
+                            selectedTracks = Set(recentTracks.map { $0.id })
+                        }
+                    }
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    
+                    Spacer()
+                    
+                    Text("\(selectedTracks.count) of \(recentTracks.count) selected")
+                        .font(.system(size: 14))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                }
+            }
+            .padding(.horizontal)
+            
+                         // Track List
+             List(recentTracks, id: \.id) { track in
+                 StreamlinedTrackRow(
+                     track: track,
+                     isSelected: selectedTracks.contains(track.id)
+                 ) {
+                     if selectedTracks.contains(track.id) {
+                         selectedTracks.remove(track.id)
+                     } else {
+                         selectedTracks.insert(track.id)
+                     }
+                 }
+                 .listRowBackground(LociTheme.Colors.contentContainer)
+             }
+             .listStyle(PlainListStyle())
+        }
+    }
+    
+    // MARK: - Importing View
+    
+    @ViewBuilder
+    func ImportingView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: LociTheme.Colors.secondaryHighlight))
+                .scaleEffect(1.5)
+            
+            VStack(spacing: LociTheme.Spacing.small) {
+                Text("Sharing Your Music")
+                    .font(LociTheme.Typography.subheading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text("Adding \(selectedTracks.count) tracks to \(dataStore.designatedLocation?.displayName ?? "your location")")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+    
+    // MARK: - Success View
+    
+    @ViewBuilder
+    func SuccessView() -> some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            // Success Icon
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Text("Music Shared!")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                if let error = errorMessage {
+                    Text(error)
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("Successfully shared \(selectedTracks.count) tracks with \(dataStore.designatedLocation?.displayName ?? "your location")")
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Text("Listen to some new music and come back to share more!")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button("Got it") {
+                dismiss()
+            }
+            .lociButton(.primary, isFullWidth: true)
+        }
+        .padding(LociTheme.Spacing.large)
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func loadRecentTracks() {
+        isLoading = true
+        
+        Task {
+            do {
+                let allTracks = try await spotifyManager.fetchRecentlyPlayedTracks(limit: 50)
+                let newTracks = dataStore.filterNewTracks(allTracks)
+                
+                await MainActor.run {
+                    self.allTracksCount = allTracks.count
+                    self.recentTracks = newTracks
+                    
+                    // Show helpful message if some/all tracks were already imported
+                    let importedCount = allTracks.count - newTracks.count
+                    if importedCount > 0 {
+                        if newTracks.isEmpty {
+                            self.errorMessage = "All \(allTracks.count) recent tracks have already been imported"
+                            self.importStep = .success
+                        } else {
+                            print("ℹ️ Filtered out \(importedCount) already-imported tracks, showing \(newTracks.count) new tracks")
+                        }
+                    }
+                    
+                    self.selectedTracks = Set(newTracks.map { $0.id }) // Select all new tracks by default
+                    
+                    if !newTracks.isEmpty {
+                        self.importStep = .trackSelection
+                    }
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
+    }
+    
+    private func performImport() {
+        guard let location = dataStore.designatedLocation else { return }
+        
+        importStep = .importing
+        
+        // Get selected tracks (already filtered for duplicates)
+        let tracksToImport = recentTracks.filter { selectedTracks.contains($0.id) }
+        
+        // This shouldn't happen since we already filtered duplicates, but safety check
+        if tracksToImport.isEmpty {
+            importStep = .success
+            errorMessage = "No tracks selected for import"
+            return
+        }
+        
+        // Create import batch using the designated location
+        let importBatch = ImportBatch(
+            id: UUID(),
+            tracks: tracksToImport,
+            location: location.displayName,
+            assignmentType: location.building != nil ? .building : .region,
+            importedAt: Date()
+        )
+        
+        // Save to data store (triggers leaderboard update)
+        dataStore.saveImportBatch(importBatch)
+        
+        // Update SpotifyManager
+        spotifyManager.hasRecentImports = !dataStore.importBatches.isEmpty
+        
+        // Show success feedback
+        NotificationManager.shared.showImportSuccessNotification(
+            trackCount: tracksToImport.count,
+            location: location.displayName
+        )
+        
+        // Move to success step
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            importStep = .success
+        }
+    }
+}
+
+// MARK: - Streamlined Track Row
+
+struct StreamlinedTrackRow: View {
+    let track: SpotifyImportTrack
+    let isSelected: Bool
+    let onToggle: () -> Void
+    
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: LociTheme.Spacing.medium) {
+                // Selection indicator
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? LociTheme.Colors.secondaryHighlight : LociTheme.Colors.disabledState)
+                
+                // Track info
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                    Text(track.name)
+                        .font(LociTheme.Typography.body)
+                        .foregroundColor(LociTheme.Colors.mainText)
+                        .lineLimit(1)
+                    
+                    Text(track.artist)
+                        .font(LociTheme.Typography.caption)
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                // Played time
+                Text(track.playedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 12))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            .padding(.vertical, LociTheme.Spacing.xSmall)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Import History View
+
+struct ImportHistoryView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LociTheme.Colors.appBackground
+                    .ignoresSafeArea()
+                
+                if dataStore.importBatches.isEmpty {
+                    VStack(spacing: LociTheme.Spacing.large) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 64, weight: .light))
+                            .foregroundColor(LociTheme.Colors.subheadText.opacity(0.5))
+                        
+                        VStack(spacing: LociTheme.Spacing.small) {
+                            Text("No Import History")
+                                .font(LociTheme.Typography.subheading)
+                                .foregroundColor(LociTheme.Colors.mainText)
+                            
+                            Text("Your Spotify imports will appear here")
+                                .font(LociTheme.Typography.body)
+                                .foregroundColor(LociTheme.Colors.subheadText)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                } else {
+                    List(dataStore.importBatches.reversed(), id: \.id) { importBatch in
+                        ImportHistoryRow(importBatch: importBatch)
+                            .listRowBackground(LociTheme.Colors.contentContainer)
+                    }
+                    .listStyle(PlainListStyle())
+                    .background(LociTheme.Colors.appBackground)
+                }
+            }
+            .navigationTitle("Import History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                }
+            }
+        }
+    }
+}
+
+struct ImportHistoryRow: View {
+    let importBatch: ImportBatch
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: LociTheme.Spacing.small) {
+            // Header
+            HStack {
+                Text("\(importBatch.tracks.count) tracks")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Spacer()
+                
+                Text(timeAgo(from: importBatch.importedAt))
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+            }
+            
+            // Location
+            HStack(spacing: LociTheme.Spacing.xSmall) {
+                Image(systemName: importBatch.assignmentType == .building ? "building.2" : "map")
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                
+                Text(importBatch.location)
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
+                    .fontWeight(.medium)
+            }
+            
+            // Track preview
+            if !importBatch.tracks.isEmpty {
+                let previewTracks = Array(importBatch.tracks.prefix(3))
+                VStack(alignment: .leading, spacing: LociTheme.Spacing.xxSmall) {
+                    ForEach(previewTracks, id: \.id) { track in
+                        HStack {
+                            Text("• \(track.name)")
+                                .font(.system(size: 13))
+                                .foregroundColor(LociTheme.Colors.mainText)
+                                .lineLimit(1)
+                            
+                            Text("by \(track.artist)")
+                                .font(.system(size: 13))
+                                .foregroundColor(LociTheme.Colors.subheadText)
+                                .lineLimit(1)
+                        }
+                    }
+                    
+                    if importBatch.tracks.count > 3 {
+                        Text("+ \(importBatch.tracks.count - 3) more tracks")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                            .italic()
+                    }
+                }
+            }
+            
+            // Total duration
+            let totalMinutes = importBatch.tracks.reduce(0) { $0 + $1.durationMinutes }
+            Text("Total: \(Int(totalMinutes)) minutes")
+                .font(.system(size: 12))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                .fontWeight(.medium)
+        }
+        .padding(.vertical, LociTheme.Spacing.small)
+    }
+    
+    private func timeAgo(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        
+        if interval < 60 {
+            return "Just now"
+        } else if interval < 3600 {
+            let minutes = Int(interval / 60)
+            return "\(minutes)m ago"
+        } else if interval < 86400 {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        } else {
+            let days = Int(interval / 86400)
+            return "\(days)d ago"
+        }
     }
 }

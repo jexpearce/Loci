@@ -422,6 +422,7 @@ struct User: Codable, Identifiable {
     let id: String
     let email: String
     let displayName: String
+    let username: String // NEW: Unique username for @mentions and search
     let spotifyUserId: String?
     let profileImageURL: String?
     let joinedDate: Date
@@ -579,6 +580,8 @@ struct LocationInfo: Codable {
 
 enum FirebaseError: Error, LocalizedError {
     case notAuthenticated
+    case usernameAlreadyTaken
+    case userNotFound
     case invalidData
     case networkError
     case permissionDenied
@@ -587,6 +590,10 @@ enum FirebaseError: Error, LocalizedError {
         switch self {
         case .notAuthenticated:
             return "User is not authenticated"
+        case .usernameAlreadyTaken:
+            return "Username is already taken"
+        case .userNotFound:
+            return "User not found"
         case .invalidData:
             return "Invalid data format"
         case .networkError:
@@ -733,34 +740,37 @@ class UserListeningData {
     }
     
     func addSession(_ session: Session) {
-        let sessionMinutes = Double(session.events.count) * 1.5 // Assume 90 seconds per track
+        // Use consistent 3-minute average per track for both sessions and imports
+        let sessionMinutes = Double(session.events.count) * 3.0 
         totalMinutes += sessionMinutes
         totalSongs += Double(session.events.count)
         
         // Add artist data
         for event in session.events {
-            artistMinutes[event.artistName, default: 0] += 1.5
+            artistMinutes[event.artistName, default: 0] += 3.0
             artistSongs[event.artistName, default: 0] += 1
             
             if let genre = event.genre {
-                genreMinutes[genre, default: 0] += 1.5
+                genreMinutes[genre, default: 0] += 3.0
                 genreSongs[genre, default: 0] += 1
             }
         }
     }
     
     func addImportBatch(_ batch: ImportBatch) {
-        let batchMinutes = Double(batch.tracks.count) * 3.0 // Assume 3 minutes per track
+        // Use actual track durations instead of assuming 3 minutes
+        var batchMinutes = 0.0
+        for track in batch.tracks {
+            let trackMinutes = track.durationMinutes
+            batchMinutes += trackMinutes
+            
+            // Add artist data with actual duration
+            artistMinutes[track.artist, default: 0] += trackMinutes
+            artistSongs[track.artist, default: 0] += 1
+        }
+        
         totalMinutes += batchMinutes
         totalSongs += Double(batch.tracks.count)
-        
-        // Add artist data from imports
-        for track in batch.tracks {
-            artistMinutes[track.artist, default: 0] += 3.0
-            artistSongs[track.artist, default: 0] += 1
-            
-            // Note: ImportedTrack doesn't have genre, would need to enhance
-        }
     }
     
     func getScore(for type: LeaderboardType, artistName: String? = nil) -> Double {
@@ -788,6 +798,11 @@ struct SpotifyImportTrack: Identifiable, Codable, SpotifyTrackProtocol {
     let album: String
     let playedAt: Date
     let imageURL: String?
+    let durationMs: Int // Duration in milliseconds from Spotify
+    
+    var durationMinutes: Double {
+        return Double(durationMs) / 60000.0 // Convert ms to minutes
+    }
 }
 
 enum SpotifyError: Error {

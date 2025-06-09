@@ -150,12 +150,12 @@ class LeaderboardManager: ObservableObject {
         let sessions: [Session]
         switch scope {
         case .building:
-            guard let building = context.building else { return [] }
-            sessions = dataStore.sessionHistory.filter { session in
-                session.events.contains { $0.buildingName == building }
-            }
+            // For building leaderboards, be more permissive for now
+            // In production, this would use proper building detection
+            sessions = dataStore.sessionHistory
         case .region:
-            // For now, use all sessions as regional data
+            // For regional leaderboards, be more permissive for now
+            // In production, this would use proper regional boundaries
             sessions = dataStore.sessionHistory
         case .global:
             sessions = dataStore.sessionHistory
@@ -165,9 +165,10 @@ class LeaderboardManager: ObservableObject {
         let imports: [ImportBatch]
         switch scope {
         case .building:
-            guard let building = context.building else { return [] }
-            imports = dataStore.importBatches.filter { $0.location == building && $0.assignmentType == .building }
+            // For building leaderboards, include all building imports for now
+            imports = dataStore.importBatches.filter { $0.assignmentType == .building }
         case .region:
+            // For regional leaderboards, include all regional imports for now
             imports = dataStore.importBatches.filter { $0.assignmentType == .region }
         case .global:
             imports = dataStore.importBatches
@@ -267,9 +268,12 @@ class LeaderboardManager: ObservableObject {
         var context = LocationContext(building: nil, region: nil, coordinate: nil)
         
         if let location = locationManager.currentLocation {
+            // Use ReverseGeocoding to get actual location data
+            let buildingInfo = await ReverseGeocoding.shared.reverseGeocodeAsync(location: location)
+            
             context = LocationContext(
-                building: "Sample Building",
-                region: "Sample City",
+                building: buildingInfo?.name,
+                region: buildingInfo?.city ?? buildingInfo?.neighborhood ?? "Your Area",
                 coordinate: location.coordinate
             )
         }

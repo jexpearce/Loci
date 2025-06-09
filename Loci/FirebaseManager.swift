@@ -2,6 +2,7 @@ import Foundation
 import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 import CoreLocation
 import Combine
 
@@ -44,11 +45,14 @@ class FirebaseManager: ObservableObject {
         }
     }
     
-    func signUp(email: String, password: String, displayName: String) async throws {
+    func signUp(email: String, password: String, displayName: String, username: String) async throws {
         isLoading = true
         errorMessage = nil
         
         do {
+            // First check if username is already taken
+            try await checkUsernameAvailability(username: username)
+            
             let result = try await auth.createUser(withEmail: email, password: password)
             
             // Create user profile in Firestore
@@ -56,6 +60,7 @@ class FirebaseManager: ObservableObject {
                 id: result.user.uid,
                 email: email,
                 displayName: displayName,
+                username: username,
                 spotifyUserId: nil,
                 profileImageURL: nil,
                 joinedDate: Date(),
@@ -69,6 +74,36 @@ class FirebaseManager: ObservableObject {
             isLoading = false
             errorMessage = error.localizedDescription
             throw error
+        }
+    }
+    
+    private func checkUsernameAvailability(username: String) async throws {
+        let query = db.collection("users")
+            .whereField("username", isEqualTo: username.lowercased())
+            .limit(to: 1)
+        
+        let snapshot = try await query.getDocuments()
+        if !snapshot.documents.isEmpty {
+            throw FirebaseError.usernameAlreadyTaken
+        }
+    }
+    
+    // Public method for checking username availability from other views
+    func checkUsernameAvailability(username: String, excludeCurrentUser: Bool = false) async throws {
+        let query = db.collection("users")
+            .whereField("username", isEqualTo: username.lowercased())
+            .limit(to: 1)
+        
+        let snapshot = try await query.getDocuments()
+        
+        if excludeCurrentUser, let currentUserId = auth.currentUser?.uid {
+            // Filter out current user if excluding them
+            let filteredDocs = snapshot.documents.filter { $0.documentID != currentUserId }
+            if !filteredDocs.isEmpty {
+                throw FirebaseError.usernameAlreadyTaken
+            }
+        } else if !snapshot.documents.isEmpty {
+            throw FirebaseError.usernameAlreadyTaken
         }
     }
     
@@ -122,6 +157,44 @@ class FirebaseManager: ObservableObject {
         
         try await db.collection("users").document(userId).updateData(updates)
         await loadUserProfile(userId: userId)
+    }
+    
+    // MARK: - Profile Picture Management
+    
+    func uploadProfilePicture(_ imageData: Data) async throws -> String {
+        guard let userId = auth.currentUser?.uid else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        let storage = Storage.storage()
+        let imageRef = storage.reference().child("profile_pictures/\(userId).jpg")
+        
+        // Upload image with metadata
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        
+        let _ = try await imageRef.putDataAsync(imageData, metadata: metadata)
+        let downloadURL = try await imageRef.downloadURL()
+        
+        // Update user profile with new image URL
+        try await updateUserProfile(["profileImageURL": downloadURL.absoluteString])
+        
+        return downloadURL.absoluteString
+    }
+    
+    func deleteProfilePicture() async throws {
+        guard let userId = auth.currentUser?.uid else {
+            throw FirebaseError.notAuthenticated
+        }
+        
+        let storage = Storage.storage()
+        let imageRef = storage.reference().child("profile_pictures/\(userId).jpg")
+        
+        // Delete image from storage
+        try await imageRef.delete()
+        
+        // Remove image URL from user profile
+        try await updateUserProfile(["profileImageURL": FieldValue.delete()])
     }
     
     // MARK: - Session Management
@@ -353,7 +426,7 @@ struct FirebaseListeningEvent: Codable {
             genre: genre,
             spotifyTrackId: spotifyTrackId
         )
-        event.id = UUID(uuidString: id) ?? UUID()
+                event.id = UUID(uuidString: id) ?? UUID()
         return event
     }
 } 

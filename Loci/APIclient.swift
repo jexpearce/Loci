@@ -430,6 +430,7 @@ struct MatchResult: Codable {
 struct UserProfile: Codable, Identifiable {
     let id: String
     let displayName: String
+    let username: String
     let email: String?
     let spotifyConnected: Bool
     let joinedDate: Date

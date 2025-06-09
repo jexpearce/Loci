@@ -37,12 +37,6 @@ struct LeaderboardView: View {
                         }
                     }
                     .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                    .onChange(of: selectedType) { _ in
-                        // Reset to region when changing type
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            currentScopeIndex = 1
-                        }
-                    }
                 }
             }
             .navigationBarHidden(true)
