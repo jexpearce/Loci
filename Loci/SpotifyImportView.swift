@@ -2,6 +2,8 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+
+
 // MARK: - Streamlined Spotify Import View (Uses Designated Location)
 
 struct StreamlinedSpotifyImportView: View {
@@ -27,13 +29,19 @@ struct StreamlinedSpotifyImportView: View {
                 LociTheme.Colors.appBackground
                     .ignoresSafeArea()
                 
-                switch importStep {
-                case .loading:
-                    LoadingImportView()
-                case .trackSelection:
-                    TrackSelectionView()
-                case .confirmation:
-                    ImportConfirmationView()
+                if let error = errorMessage {
+                    AllTracksImportedView(error: error) {
+                        dismiss()
+                    }
+                } else {
+                    switch importStep {
+                    case .loading:
+                        LoadingImportView()
+                    case .trackSelection:
+                        TrackSelectionView()
+                    case .confirmation:
+                        ImportConfirmationView()
+                    }
                 }
             }
             .navigationTitle("Share to \(dataStore.designatedLocation?.displayName ?? "Your Area")")
@@ -169,8 +177,17 @@ struct StreamlinedSpotifyImportView: View {
                 let tracks = try await spotifyManager.fetchRecentlyPlayedTracks(limit: 50)
                 
                 await MainActor.run {
-                    self.recentTracks = tracks
-                    self.selectedTracks = Set(tracks.map { $0.id }) // Select all by default
+                    // Filter out already imported tracks
+                    let newTracks = dataStore.filterNewTracks(tracks)
+                    
+                    if newTracks.isEmpty {
+                        self.errorMessage = "All recent tracks have already been imported!"
+                        self.isLoading = false
+                        return
+                    }
+                    
+                    self.recentTracks = newTracks
+                    self.selectedTracks = Set(newTracks.map { $0.id }) // Select all new tracks by default
                     self.importStep = .trackSelection
                     self.isLoading = false
                 }
@@ -247,6 +264,41 @@ struct StreamlinedImportSummaryCard: View {
         }
         .padding(LociTheme.Spacing.medium)
         .lociCard()
+    }
+}
+
+struct AllTracksImportedView: View {
+    let error: String
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        VStack(spacing: LociTheme.Spacing.large) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+            
+            VStack(spacing: LociTheme.Spacing.medium) {
+                Text("All Caught Up!")
+                    .font(LociTheme.Typography.heading)
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text(error)
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+                
+                Text("Listen to some new music and come back to share more!")
+                    .font(LociTheme.Typography.body)
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button("Got it") {
+                onDismiss()
+            }
+            .lociButton(.primary, isFullWidth: true)
+        }
+        .padding(LociTheme.Spacing.large)
     }
 }
 
@@ -488,8 +540,17 @@ struct EnhancedSpotifyImportView: View {
                 let tracks = try await spotifyManager.fetchRecentlyPlayedTracks(limit: 50)
                 
                 await MainActor.run {
-                    self.recentTracks = tracks
-                    self.selectedTracks = Set(tracks.map { $0.id }) // Select all by default
+                    // Filter out already imported tracks
+                    let newTracks = dataStore.filterNewTracks(tracks)
+                    
+                    if newTracks.isEmpty {
+                        self.errorMessage = "All recent tracks have already been imported!"
+                        self.isLoading = false
+                        return
+                    }
+                    
+                    self.recentTracks = newTracks
+                    self.selectedTracks = Set(newTracks.map { $0.id }) // Select all new tracks by default
                     self.importStep = .trackSelection
                     self.isLoading = false
                 }

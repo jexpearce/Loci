@@ -74,6 +74,7 @@ class DataStore: ObservableObject {
         fetchSessionHistory()
         loadActiveOnePlaceSession()
         loadDesignatedLocation()
+        loadImportedTrackIds()
     }
 
     // MARK: - Current Session Management
@@ -434,18 +435,45 @@ class DataStore: ObservableObject {
     // MARK: - Import Batch Storage
 
     @Published var importBatches: [ImportBatch] = []
+    
+    // Track imported songs to prevent duplicates
+    private var importedTrackIds: Set<String> = []
 
     func saveImportBatch(_ batch: ImportBatch) {
+        // Add track IDs to imported set
+        for track in batch.tracks {
+            importedTrackIds.insert(track.id)
+        }
+        
         importBatches.append(batch)
         
         // Save to persistent storage
         container.mainContext.insert(ImportBatchEntity.from(batch))
         try? container.mainContext.save()
         
+        // Save imported track IDs to UserDefaults
+        let trackIdArray = Array(importedTrackIds)
+        UserDefaults.standard.set(trackIdArray, forKey: "importedTrackIds")
+        
         // Trigger leaderboard refresh
         NotificationCenter.default.post(name: .leaderboardDataUpdated, object: batch)
         
         print("✅ Saved import batch: \(batch.tracks.count) tracks to \(batch.location)")
+    }
+    
+    func filterNewTracks<T: SpotifyTrackProtocol>(_ tracks: [T]) -> [T] {
+        return tracks.filter { !importedTrackIds.contains($0.id) }
+    }
+    
+    func getNewTrackCount<T: SpotifyTrackProtocol>(_ tracks: [T]) -> Int {
+        return filterNewTracks(tracks).count
+    }
+    
+    private func loadImportedTrackIds() {
+        if let savedIds = UserDefaults.standard.array(forKey: "importedTrackIds") as? [String] {
+            importedTrackIds = Set(savedIds)
+            print("✅ Loaded \(importedTrackIds.count) imported track IDs")
+        }
     }
 
     private func addDemoUsers(to userDataMap: inout [String: UserListeningData], basedOn currentUser: UserListeningData?) {

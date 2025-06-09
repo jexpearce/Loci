@@ -760,9 +760,14 @@ class UserListeningData {
         }
     }
 }
+// MARK: - Protocol for Track Filtering
+protocol SpotifyTrackProtocol {
+    var id: String { get }
+}
+
 // MARK: - UI Models for Import (Different from EnrichmentEngine internals)
 
-struct SpotifyImportTrack: Identifiable, Codable {
+struct SpotifyImportTrack: Identifiable, Codable, SpotifyTrackProtocol {
     let id: String
     let name: String
     let artist: String
