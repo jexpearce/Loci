@@ -884,8 +884,8 @@ struct SettingsView: View {
                     title: "Spotify Connected",
                     subtitle: "Disconnect to stop music tracking",
                     action: { 
-                        // Clear tokens and set authenticated to false
-                        spotifyManager.isAuthenticated = false
+                        // Properly sign out of Spotify
+                        spotifyManager.signOut()
                     }
                 )
             } else {

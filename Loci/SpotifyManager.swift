@@ -567,6 +567,31 @@ class SpotifyManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Sign Out
+    
+    func signOut() {
+        // Clear all stored tokens from keychain
+        let keys = ["accessToken", "refreshToken", "expiryDate"]
+        for key in keys {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key
+            ]
+            SecItemDelete(query as CFDictionary)
+        }
+        
+        // Reset published state
+        DispatchQueue.main.async {
+            self.isAuthenticated = false
+            self.currentTrack = nil
+            self.userPlaylists = []
+            self.hasRecentImports = false
+        }
+        
+        print("🚪 Spotify: Signed out and cleared all tokens")
+    }
+
     // MARK: — PKCE Utilities
 
     private static func makeCodeVerifier() -> String {

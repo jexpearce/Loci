@@ -135,6 +135,9 @@ class FirebaseManager: ObservableObject {
     func signOut() throws {
         try auth.signOut()
         currentUser = nil
+        
+        // Also sign out of Spotify when user signs out of Firebase
+        SpotifyManager.shared.signOut()
     }
     
     func resetPassword(email: String) async throws {
@@ -183,6 +186,26 @@ class FirebaseManager: ObservableObject {
                 )
                 
                 try await saveUserProfile(user: user)
+            } else {
+                // Existing user - ensure profile is loaded properly
+                await loadUserProfile(userId: authResult.user.uid)
+                
+                // If no profile exists (edge case), create one
+                if currentUser == nil {
+                    let user = User(
+                        id: authResult.user.uid,
+                        email: authResult.user.email ?? "",
+                        displayName: authResult.user.displayName ?? "Google User",
+                        username: generateUsernameFromEmail(authResult.user.email ?? ""),
+                        spotifyUserId: nil,
+                        profileImageURL: authResult.user.photoURL?.absoluteString,
+                        joinedDate: Date(),
+                        privacySettings: PrivacySettings(),
+                        musicPreferences: MusicPreferences()
+                    )
+                    
+                    try await saveUserProfile(user: user)
+                }
             }
             
             isLoading = false
@@ -271,6 +294,44 @@ class FirebaseManager: ObservableObject {
                 )
                 
                 try await saveUserProfile(user: user)
+            } else {
+                // Existing user - ensure profile is loaded properly
+                await loadUserProfile(userId: authResult.user.uid)
+                
+                // If no profile exists (edge case), create one
+                if currentUser == nil {
+                    let displayName: String
+                    let username: String
+                    
+                    if let givenName = appleIDCredential.fullName?.givenName,
+                       let familyName = appleIDCredential.fullName?.familyName,
+                       !givenName.isEmpty || !familyName.isEmpty {
+                        displayName = "\(givenName) \(familyName)".trimmingCharacters(in: .whitespaces)
+                    } else {
+                        displayName = "Apple User"
+                    }
+                    
+                    // Generate username from Apple ID or create a random one
+                    if let email = appleIDCredential.email {
+                        username = generateUsernameFromEmail(email)
+                    } else {
+                        username = "user\(String(Int.random(in: 10000...99999)))"
+                    }
+                    
+                    let user = User(
+                        id: authResult.user.uid,
+                        email: authResult.user.email ?? appleIDCredential.email ?? "",
+                        displayName: displayName,
+                        username: username,
+                        spotifyUserId: nil,
+                        profileImageURL: authResult.user.photoURL?.absoluteString,
+                        joinedDate: Date(),
+                        privacySettings: PrivacySettings(),
+                        musicPreferences: MusicPreferences()
+                    )
+                    
+                    try await saveUserProfile(user: user)
+                }
             }
             
             currentNonce = nil
@@ -362,11 +423,17 @@ class FirebaseManager: ObservableObject {
         do {
             let document = try await db.collection("users").document(userId).getDocument()
             if let data = document.data() {
-                currentUser = try Firestore.Decoder().decode(User.self, from: data)
+                let user = try Firestore.Decoder().decode(User.self, from: data)
+                print("📱 Loaded user profile: \(user.displayName), username: '\(user.username)'")
+                currentUser = user
+            } else {
+                print("❌ No user document found for ID: \(userId)")
+                currentUser = nil
             }
         } catch {
-            print("Error loading user profile: \(error)")
+            print("❌ Error loading user profile: \(error)")
             errorMessage = "Failed to load user profile"
+            currentUser = nil
         }
     }
     

@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection - allow users to create and manage their own profiles
+    match /users/{userId} {
+      // Allow reading any user's public profile info
+      allow read: if true;
+      
+      // Allow creating a new user document if the user is authenticated 
+      // and the document ID matches their auth UID
+      allow create: if request.auth != null 
+                   && request.auth.uid == userId
+                   && request.resource.data.keys().hasAll(['id', 'email', 'displayName', 'username'])
+                   && request.resource.data.id == userId;
+      
+      // Allow users to update their own profile
+      allow update: if request.auth != null 
+                   && request.auth.uid == userId;
+      
+      // Allow users to delete their own profile
+      allow delete: if request.auth != null 
+                   && request.auth.uid == userId;
+    }
+    
+    // Sessions collection - allow users to manage their own sessions
+    match /sessions/{sessionId} {
+      // Allow reading sessions if user owns it or it's public
+      allow read: if request.auth != null 
+                 && (resource.data.userId == request.auth.uid 
+                     || resource.data.privacyLevel == 'public');
+      
+      // Allow creating sessions if user is authenticated and owns the session
+      allow create: if request.auth != null 
+                   && request.resource.data.userId == request.auth.uid;
+      
+      // Allow updating own sessions
+      allow update: if request.auth != null 
+                   && resource.data.userId == request.auth.uid;
+      
+      // Allow deleting own sessions
+      allow delete: if request.auth != null 
+                   && resource.data.userId == request.auth.uid;
+    }
+    
+    // Friend requests collection
+    match /friend_requests/{requestId} {
+      // Allow reading if you're the sender or recipient
+      allow read: if request.auth != null 
+                 && (resource.data.fromUserId == request.auth.uid 
+                     || resource.data.toUserId == request.auth.uid);
+      
+      // Allow creating if you're the sender
+      allow create: if request.auth != null 
+                   && request.resource.data.fromUserId == request.auth.uid;
+      
+      // Allow updating if you're the recipient (to accept/decline)
+      allow update: if request.auth != null 
+                   && resource.data.toUserId == request.auth.uid;
+      
+      // Allow deleting if you're the sender or recipient
+      allow delete: if request.auth != null 
+                   && (resource.data.fromUserId == request.auth.uid 
+                       || resource.data.toUserId == request.auth.uid);
+    }
+    
+    // Friendships collection
+    match /friendships/{friendshipId} {
+      // Allow reading if you're one of the friends
+      allow read: if request.auth != null 
+                 && (resource.data.userId1 == request.auth.uid 
+                     || resource.data.userId2 == request.auth.uid);
+      
+      // Allow creating friendships (done by system when accepting requests)
+      allow create: if request.auth != null 
+                   && (request.resource.data.userId1 == request.auth.uid 
+                       || request.resource.data.userId2 == request.auth.uid);
+      
+      // Allow deleting friendships if you're one of the friends
+      allow delete: if request.auth != null 
+                   && (resource.data.userId1 == request.auth.uid 
+                       || resource.data.userId2 == request.auth.uid);
+    }
+    
+    // Friends collection (user's friend list)
+    match /friends/{friendId} {
+      // Allow reading if you own this friend record
+      allow read: if request.auth != null 
+                 && resource.data.userId == request.auth.uid;
+      
+      // Allow creating friend records
+      allow create: if request.auth != null 
+                   && request.resource.data.userId == request.auth.uid;
+      
+      // Allow deleting friend records
+      allow delete: if request.auth != null 
+                   && resource.data.userId == request.auth.uid;
+    }
+    
+    // Building activity collection - allow reading for discovery
+    match /building_activity/{buildingId} {
+      // Allow reading building activity for location-based discovery
+      allow read: if request.auth != null;
+      
+      // Allow writing for updating activity (system writes)
+      allow write: if request.auth != null;
+    }
+    
+    // Matches collection
+    match /matches/{matchId} {
+      // Allow reading if you own this match
+      allow read: if request.auth != null 
+                 && resource.data.userId == request.auth.uid;
+      
+      // Allow creating matches
+      allow create: if request.auth != null 
+                   && request.resource.data.userId == request.auth.uid;
+      
+      // Allow deleting your own matches
+      allow delete: if request.auth != null 
+                   && resource.data.userId == request.auth.uid;
+    }
+    
+    // Leaderboards collection - read-only for users
+    match /leaderboards/{leaderboardId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write leaderboards
+    }
+    
+    // Import batches or any other collections - allow users to manage their own data
+    match /{collection}/{document} {
+      // Fallback rule - allow users to read/write their own data
+      allow read, write: if request.auth != null 
+                        && request.auth.uid == resource.data.userId;
+    }
+  }
+} 

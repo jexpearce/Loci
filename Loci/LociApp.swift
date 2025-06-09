@@ -732,7 +732,7 @@ struct EditProfileView: View {
     @EnvironmentObject var firebaseManager: FirebaseManager
     
     @State private var displayName = ""
-    @State private var username = "Loading..."
+    @State private var username = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
@@ -928,25 +928,25 @@ struct EditProfileView: View {
             print("✅ User found: \(user.displayName), username: '\(user.username)'")
             displayName = user.displayName
             
-            // Handle existing accounts that might not have username set
-            if user.username.isEmpty {
-                print("⚠️ Username is empty, generating suggested username")
+            // Handle existing accounts that might not have username set properly
+            if user.username.isEmpty || user.username == "Loading..." {
+                print("⚠️ Username is empty or invalid, generating suggested username")
                 // Generate a suggested username from display name or email
                 let suggestedUsername = generateSuggestedUsername(from: user.displayName, email: user.email)
                 username = suggestedUsername
-                isExistingAccount = true // Disable username editing for existing accounts
+                isExistingAccount = false // Allow them to set their username
                 print("💡 Generated username: \(suggestedUsername)")
             } else {
                 print("✅ Using existing username: \(user.username)")
                 username = user.username
-                isExistingAccount = false // Allow username editing for new accounts
+                isExistingAccount = true // Don't allow changing existing usernames
             }
         } else {
             print("❌ No current user found")
             // Set fallback values
             displayName = ""
             username = "user_" + String(Int.random(in: 1000...9999))
-            isExistingAccount = true
+            isExistingAccount = false
         }
         
         print("📝 Final values - displayName: '\(displayName)', username: '\(username)', isExisting: \(isExistingAccount)")
@@ -987,12 +987,18 @@ struct EditProfileView: View {
                     "displayName": displayName
                 ]
                 
-                // Only update username if it's different, valid, and not an existing account
+                // Only update username if it's different, valid, and user is allowed to change it
                 let currentUsername = firebaseManager.currentUser?.username ?? ""
                 if !isExistingAccount && username.lowercased() != currentUsername.lowercased() && !username.isEmpty {
                     // Check if username is taken
                     try await checkUsernameAvailability()
                     updates["username"] = username.lowercased()
+                } else if currentUsername.isEmpty || currentUsername == "Loading..." {
+                    // Force update for accounts with missing/invalid usernames
+                    if !username.isEmpty && isValidUsername(username) {
+                        try await checkUsernameAvailability()
+                        updates["username"] = username.lowercased()
+                    }
                 }
                 
                 // Try to update profile using safer method

@@ -354,6 +354,9 @@ struct AuthenticationView: View {
     }
     
     private func performAuth() {
+        // Dismiss keyboard first
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
         Task {
             do {
                 switch authMode {
@@ -369,6 +372,9 @@ struct AuthenticationView: View {
     }
     
     private func signInWithGoogle() {
+        // Dismiss keyboard first
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
         Task {
             do {
                 try await firebaseManager.signInWithGoogle()
@@ -380,6 +386,9 @@ struct AuthenticationView: View {
     }
     
     private func signInWithApple() {
+        // Dismiss keyboard first
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
         Task {
             do {
                 try await firebaseManager.signInWithApple()
