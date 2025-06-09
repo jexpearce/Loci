@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 // MARK: - Profile Top Artists/Songs Component
 
@@ -8,65 +9,13 @@ struct ProfileTopItemsView: View {
     @StateObject private var viewModel = ProfileTopItemsViewModel()
     
     var body: some View {
-        VStack(spacing: LociTheme.Spacing.medium) {
-            // Header with time range
-            HStack {
-                Text("Your Top \(selectedTab.rawValue)")
-                    .font(LociTheme.Typography.subheading)
-                    .foregroundColor(LociTheme.Colors.mainText)
-                
-                Spacer()
-                
-                Menu {
-                    ForEach(ProfileTimeRange.allCases, id: \.self) { range in
-                        Button(range.displayName) {
-                            timeRange = range
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(timeRange.displayName)
-                            .font(.system(size: 12))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
-                }
-            }
-            
-            // Tab selector
-            HStack(spacing: 0) {
-                ForEach(ProfileTopTab.allCases, id: \.self) { tab in
-                    Button(action: { selectedTab = tab }) {
-                        Text(tab.rawValue)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(selectedTab == tab ? .white : LociTheme.Colors.subheadText)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(selectedTab == tab ? LociTheme.Colors.primaryAction : Color.clear)
-                            )
-                    }
-                }
-            }
-            .background(LociTheme.Colors.disabledState.opacity(0.3))
-            .cornerRadius(8)
-            
-            // Content
-            if viewModel.isLoading {
-                ProgressView()
-                    .frame(height: 200)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(Array(currentItems.prefix(5).enumerated()), id: \.element.id) { index, item in
-                        ProfileTopItemRow(item: item, rank: index + 1)
-                    }
-                }
-            }
+        VStack(spacing: 16) {
+            headerSection
+            tabSelector
+            contentSection
         }
-        .padding(LociTheme.Spacing.medium)
-        .lociCard(backgroundColor: LociTheme.Colors.contentContainer)
+        .padding(16)
+        .background(cardBackground)
         .onChange(of: selectedTab) { _ in
             Task { await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange) }
         }
@@ -76,6 +25,88 @@ struct ProfileTopItemsView: View {
         .task {
             await viewModel.loadTopItems(tab: selectedTab, timeRange: timeRange)
         }
+    }
+    
+    private var headerSection: some View {
+        HStack {
+            Text("Your Top \(selectedTab.rawValue)")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            
+            Spacer()
+            
+            timeRangeMenu
+        }
+    }
+    
+    private var timeRangeMenu: some View {
+        Menu {
+            ForEach(ProfileTimeRange.allCases, id: \.self) { range in
+                Button(range.displayName) {
+                    timeRange = range
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(timeRange.displayName)
+                    .font(.system(size: 12))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10))
+            }
+            .foregroundColor(.blue)
+        }
+    }
+    
+    private var tabSelector: some View {
+        HStack(spacing: 0) {
+            ForEach(ProfileTopTab.allCases, id: \.self) { tab in
+                tabButton(for: tab)
+            }
+        }
+        .background(Color.gray.opacity(0.3))
+        .cornerRadius(8)
+    }
+    
+    private func tabButton(for tab: ProfileTopTab) -> some View {
+        Button(action: { selectedTab = tab }) {
+            Text(tab.rawValue)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(selectedTab == tab ? .white : .gray)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(selectedTab == tab ? .blue : Color.clear)
+                )
+        }
+    }
+    
+    private var contentSection: some View {
+        Group {
+            if viewModel.isLoading {
+                ProgressView()
+                    .frame(height: 200)
+            } else {
+                itemsList
+            }
+        }
+    }
+    
+    private var itemsList: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(currentItems.prefix(5).enumerated()), id: \.element.id) { index, item in
+                ProfileTopItemRow(item: item, rank: index + 1)
+            }
+        }
+    }
+    
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(Color.white.opacity(0.1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
     }
     
     private var currentItems: [ProfileTopItem] {
@@ -101,13 +132,13 @@ struct ProfileTopItemRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(LociTheme.Colors.mainText)
+                    .foregroundColor(.white)
                     .lineLimit(1)
                 
                 if let subtitle = item.subtitle {
                     Text(subtitle)
                         .font(.system(size: 12))
-                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .foregroundColor(.gray)
                         .lineLimit(1)
                 }
             }
@@ -117,7 +148,7 @@ struct ProfileTopItemRow: View {
             // Play count
             Text("\(item.playCount) plays")
                 .font(.system(size: 11))
-                .foregroundColor(LociTheme.Colors.subheadText)
+                .foregroundColor(.gray)
         }
         .padding(.vertical, 6)
     }
@@ -127,7 +158,7 @@ struct ProfileTopItemRow: View {
         case 1: return Color(red: 1.0, green: 0.84, blue: 0)
         case 2: return Color(red: 0.75, green: 0.75, blue: 0.75)
         case 3: return Color(red: 0.80, green: 0.50, blue: 0.20)
-        default: return LociTheme.Colors.subheadText
+        default: return .gray
         }
     }
 }
@@ -192,17 +223,17 @@ class ProfileTopItemsViewModel: ObservableObject {
         }
         
         // Sort and convert to items
-        return artistCounts
-            .sorted { $0.value > $1.value }
-            .prefix(10)
-            .map { artist, count in
-                ProfileTopItem(
-                    id: artist,
-                    name: artist,
-                    subtitle: nil,
-                    playCount: count
-                )
-            }
+        let sortedCounts = artistCounts.sorted { $0.value > $1.value }
+        let topCounts = Array(sortedCounts.prefix(10))
+        
+        return topCounts.map { artist, count in
+            ProfileTopItem(
+                id: artist,
+                name: artist,
+                subtitle: nil,
+                playCount: count
+            )
+        }
     }
     
     private func calculateTopSongs(from sessions: [Session]) -> [ProfileTopItem] {
@@ -231,20 +262,20 @@ class ProfileTopItemsViewModel: ObservableObject {
         }
         
         // Sort and convert to items
-        return songData
-            .sorted { $0.value.count > $1.value.count }
-            .prefix(10)
-            .compactMap { key, value in
-                let parts = key.split(separator: "___", maxSplits: 1)
-                guard parts.count == 2 else { return nil }
-                
-                return ProfileTopItem(
-                    id: key,
-                    name: String(parts[0]),
-                    subtitle: String(parts[1]),
-                    playCount: value.count
-                )
-            }
+        let sortedSongs = songData.sorted { $0.value.count > $1.value.count }
+        let topSongs = Array(sortedSongs.prefix(10))
+        
+        return topSongs.compactMap { key, value in
+            let parts = key.split(separator: "___", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            
+            return ProfileTopItem(
+                id: key,
+                name: String(parts[0]),
+                subtitle: String(parts[1]),
+                playCount: value.count
+            )
+        }
     }
 }
 

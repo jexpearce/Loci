@@ -14,6 +14,8 @@ struct LociApp: App {
     @StateObject private var firebaseManager = FirebaseManager.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
+    @State private var hasCompletedOnboarding = false
+    
     init() {
         // Configure Firebase
         FirebaseApp.configure()
@@ -26,12 +28,13 @@ struct LociApp: App {
                     // Show authentication if user is not signed in
                     AuthenticationView()
                         .environmentObject(firebaseManager)
-                } else if !spotifyManager.isAuthenticated {
-                    // Show Spotify onboarding if Firebase auth is complete but Spotify is not connected
-                    SpotifyOnboardingView()
+                } else if !hasCompletedOnboarding {
+                    // Show onboarding flow after authentication
+                    OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
                         .environmentObject(spotifyManager)
+                        .environmentObject(locationManager)
                 } else {
-                    // Show main app when both Firebase and Spotify are authenticated
+                    // Show main app when authentication and onboarding are complete
                     MainAppView()
                         .environmentObject(sessionManager)
                         .environmentObject(locationManager)
@@ -43,6 +46,8 @@ struct LociApp: App {
             .preferredColorScheme(.dark)
             .onAppear {
                 setupApp()
+                // Check if user has completed onboarding
+                hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
             }
         }
     }
@@ -162,6 +167,10 @@ struct UserProfileView: View {
                             }
                         }
                         .padding(.top, 40)
+                        
+                        // Top Artists/Songs Section
+                        ProfileTopItemsView()
+                            .padding(.horizontal, 20)
                         
                         // Profile sections
                         VStack(spacing: 16) {

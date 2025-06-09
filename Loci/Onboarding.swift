@@ -9,12 +9,31 @@ struct OnboardingView: View {
     @EnvironmentObject var spotifyManager: SpotifyManager
     @EnvironmentObject var locationManager: LocationManager
     
+    private let totalPages = 5
+    
     var body: some View {
         ZStack {
             LociTheme.Colors.appBackground
                 .ignoresSafeArea()
             
-            TabView(selection: $currentPage) {
+            VStack {
+                // Progress indicator
+                if currentPage > 0 && currentPage < 4 {
+                    HStack {
+                        Spacer()
+                        ProgressView(value: Double(currentPage), total: Double(totalPages - 1))
+                            .progressViewStyle(LinearProgressViewStyle(tint: LociTheme.Colors.primaryAction))
+                            .frame(width: 100)
+                        Text("\(currentPage)/\(totalPages - 1)")
+                            .font(.system(size: 12))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        Spacer()
+                    }
+                    .padding(.top, 10)
+                    .padding(.horizontal)
+                }
+                
+                TabView(selection: $currentPage) {
                 // Page 1: Welcome
                 OnboardingWelcomePage()
                     .tag(0)
@@ -45,23 +64,54 @@ struct OnboardingView: View {
                     }
                 )
                 .tag(4)
-            }
-            .tabViewStyle(PageTabViewStyle())
-            .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
-            
-            // Skip button (except on last page)
-            if currentPage < 4 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button("Skip") {
-                            currentPage = 4
+                }
+                .tabViewStyle(PageTabViewStyle())
+                .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
+                
+                // Navigation controls
+                HStack {
+                    // Back button
+                    if currentPage > 0 {
+                        Button("Back") {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                currentPage -= 1
+                            }
                         }
                         .foregroundColor(LociTheme.Colors.subheadText)
-                        .padding()
+                    } else {
+                        Spacer()
+                            .frame(width: 50)
                     }
+                    
                     Spacer()
+                    
+                    // Next/Skip button
+                    if currentPage < 4 {
+                        HStack(spacing: 20) {
+                            if currentPage < 3 {
+                                Button("Next") {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        currentPage += 1
+                                    }
+                                }
+                                .foregroundColor(LociTheme.Colors.primaryAction)
+                                .font(.system(size: 16, weight: .medium))
+                            }
+                            
+                            Button("Skip") {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    currentPage = 4
+                                }
+                            }
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        }
+                    } else {
+                        Spacer()
+                            .frame(width: 50)
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
             }
         }
     }
@@ -84,12 +134,43 @@ struct OnboardingWelcomePage: View {
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("Share your music taste with the world around you")
+                Text("Thanks for joining! Let's get you set up to share your music taste with the world around you.")
                     .font(.system(size: 18))
                     .foregroundColor(LociTheme.Colors.subheadText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 32)
             }
+            
+            VStack(spacing: 20) {
+                HStack(spacing: 12) {
+                    Image(systemName: "person.2.wave.2.fill")
+                        .foregroundColor(LociTheme.Colors.primaryAction)
+                    Text("Connect with music lovers nearby")
+                        .font(.system(size: 16))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    Spacer()
+                }
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "map.fill")
+                        .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    Text("See what's trending in your area")
+                        .font(.system(size: 16))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    Spacer()
+                }
+                
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(LociTheme.Colors.notificationBadge)
+                    Text("Discover new music through location")
+                        .font(.system(size: 16))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, 40)
+            .padding(.top, 20)
             
             Spacer()
             Spacer()
@@ -148,29 +229,44 @@ struct OnboardingSpotifyPage: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image("spotify-logo") // You'll need to add this asset
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 80, height: 80)
+            // Use music note icon if Spotify logo isn't available
+            Image(systemName: "music.note.list")
+                .font(.system(size: 80))
+                .foregroundColor(Color(red: 0.11, green: 0.73, blue: 0.33))
+                .glow(color: Color(red: 0.11, green: 0.73, blue: 0.33), radius: 15)
             
             VStack(spacing: 16) {
                 Text("Connect Spotify")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("We'll sync with your Spotify to track what you're listening to")
+                Text("Loci uses your listening data to create live, location-based music charts and matches. Your privacy is always protected.")
                     .font(.system(size: 16))
                     .foregroundColor(LociTheme.Colors.subheadText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 32)
             }
+            
+            // Privacy benefits
+            VStack(spacing: 16) {
+                OnboardingPrivacyPoint(
+                    icon: "shield.fill",
+                    text: "Your listening data stays secure"
+                )
+                
+                OnboardingPrivacyPoint(
+                    icon: "chart.bar.fill",
+                    text: "Only anonymized trends are shared"
+                )
+            }
+            .padding(.horizontal, 40)
             
             if isConnected {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                    Text("Connected")
-                        .font(.system(size: 16, weight: .medium))
+                    Text("✅ Connected to Spotify!")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.green)
                 }
                 .padding()
@@ -179,8 +275,8 @@ struct OnboardingSpotifyPage: View {
             } else {
                 Button(action: onConnect) {
                     HStack {
-                        Image(systemName: "link")
-                        Text("Connect Spotify")
+                        Image(systemName: "music.note")
+                        Text("Connect to Spotify")
                     }
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
@@ -188,6 +284,7 @@ struct OnboardingSpotifyPage: View {
                     .padding()
                     .background(Color(red: 0.11, green: 0.73, blue: 0.33)) // Spotify green
                     .cornerRadius(12)
+                    .shadow(color: LociTheme.Colors.secondaryHighlight.opacity(0.3), radius: 8, x: 0, y: 0)
                 }
                 .padding(.horizontal, 40)
             }
@@ -279,30 +376,74 @@ struct OnboardingCompletePage: View {
         VStack(spacing: 40) {
             Spacer()
             
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: "party.popper.fill")
                 .font(.system(size: 80))
-                .foregroundColor(.green)
+                .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                .glow(color: LociTheme.Colors.secondaryHighlight, radius: 20)
             
             VStack(spacing: 16) {
                 Text("You're All Set!")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("Start a session to begin sharing your music taste")
+                Text("Welcome to the Loci community! You're ready to start sharing your music taste and discovering what's trending around you.")
                     .font(.system(size: 18))
                     .foregroundColor(LociTheme.Colors.subheadText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 32)
             }
             
+            VStack(spacing: 16) {
+                Text("Next steps:")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Text("1.")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        Text("Start a listening session")
+                            .font(.system(size: 16))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        Spacer()
+                    }
+                    
+                    HStack(spacing: 12) {
+                        Text("2.")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        Text("Play music on Spotify")
+                            .font(.system(size: 16))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        Spacer()
+                    }
+                    
+                    HStack(spacing: 12) {
+                        Text("3.")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(LociTheme.Colors.primaryAction)
+                        Text("Discover trends & connect with others")
+                            .font(.system(size: 16))
+                            .foregroundColor(LociTheme.Colors.subheadText)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 40)
+            
             Button(action: onComplete) {
-                Text("Start Using Loci")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(LociTheme.Colors.primaryGradient)
-                    .cornerRadius(12)
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                    Text("Start Using Loci")
+                }
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(LociTheme.Colors.primaryGradient)
+                .cornerRadius(12)
+                .shadow(color: LociTheme.Colors.primaryAction.opacity(0.3), radius: 8, x: 0, y: 0)
             }
             .padding(.horizontal, 40)
             

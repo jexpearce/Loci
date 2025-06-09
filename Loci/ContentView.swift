@@ -801,20 +801,184 @@ struct SocialActivityCard: View {
     }
 }
 
-// MARK: - Settings View Placeholder
+// MARK: - Settings View
 
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var firebaseManager: FirebaseManager
+    @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var dataStore: DataStore
+    @StateObject private var privacyManager = PrivacyManager.shared
+    @StateObject private var notificationManager = NotificationManager.shared
+    
+    @State private var showingSignOutAlert = false
+    @State private var showingDeleteAccountAlert = false
+    @State private var showingPrivacyExplanation = false
+    @State private var showingDataExportSheet = false
+    @State private var notificationsEnabled = false
     
     var body: some View {
         NavigationView {
             ZStack {
-                LociTheme.Colors.appBackground
-                    .ignoresSafeArea()
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.05, green: 0.05, blue: 0.1),
+                        Color(red: 0.1, green: 0.05, blue: 0.15)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
                 
-                Text("Settings Coming Soon")
-                    .font(LociTheme.Typography.subheading)
-                    .foregroundColor(LociTheme.Colors.mainText)
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Account Section
+                        SettingsSection(title: "Account") {
+                            SettingsRow(
+                                icon: "person.circle",
+                                title: "Account Info",
+                                subtitle: firebaseManager.currentUser?.email ?? "Not signed in",
+                                action: {}
+                            )
+                            
+                            if spotifyManager.isAuthenticated {
+                                SettingsRow(
+                                    icon: "music.note",
+                                    title: "Spotify Connected",
+                                    subtitle: "Disconnect to stop music tracking",
+                                    action: { spotifyManager.disconnect() }
+                                )
+                            } else {
+                                SettingsRow(
+                                    icon: "music.note",
+                                    title: "Connect Spotify",
+                                    subtitle: "Enable music tracking",
+                                    action: { spotifyManager.startAuthorization() }
+                                )
+                            }
+                        }
+                        
+                        // Privacy Section
+                        SettingsSection(title: "Privacy & Data") {
+                            SettingsToggleRow(
+                                icon: "location",
+                                title: "Share Location",
+                                subtitle: "Allow others to see your general area",
+                                isOn: $privacyManager.privacySettings.shareLocation
+                            )
+                            
+                            SettingsToggleRow(
+                                icon: "music.note",
+                                title: "Share Listening Activity",
+                                subtitle: "Show what you're listening to",
+                                isOn: $privacyManager.privacySettings.shareListeningActivity
+                            )
+                            
+                            SettingsToggleRow(
+                                icon: "person.2",
+                                title: "Allow Friend Requests",
+                                subtitle: "Let others send you friend requests",
+                                isOn: $privacyManager.privacySettings.allowFriendRequests
+                            )
+                            
+                            SettingsToggleRow(
+                                icon: "eye",
+                                title: "Show Online Status",
+                                subtitle: "Let friends see when you're active",
+                                isOn: $privacyManager.privacySettings.showOnlineStatus
+                            )
+                            
+                            SettingsRow(
+                                icon: "shield",
+                                title: "Privacy Explanation",
+                                subtitle: "How we protect your data",
+                                action: { showingPrivacyExplanation = true }
+                            )
+                        }
+                        
+                        // Notifications Section
+                        SettingsSection(title: "Notifications") {
+                            SettingsToggleRow(
+                                icon: "bell",
+                                title: "Push Notifications",
+                                subtitle: "Get notified about matches and activity",
+                                isOn: $notificationsEnabled
+                            )
+                        }
+                        
+                        // Data Management Section
+                        SettingsSection(title: "Data Management") {
+                            SettingsRow(
+                                icon: "square.and.arrow.up",
+                                title: "Export My Data",
+                                subtitle: "Download all your Loci data",
+                                action: { showingDataExportSheet = true }
+                            )
+                            
+                            SettingsRow(
+                                icon: "trash",
+                                title: "Delete All Data",
+                                subtitle: "Permanently remove all your data",
+                                action: { showingDeleteAccountAlert = true },
+                                isDestructive: true
+                            )
+                        }
+                        
+                        // About Section
+                        SettingsSection(title: "About") {
+                            SettingsRow(
+                                icon: "info.circle",
+                                title: "About Loci",
+                                subtitle: "Version 1.0",
+                                action: {}
+                            )
+                            
+                            SettingsRow(
+                                icon: "doc.text",
+                                title: "Terms of Service",
+                                subtitle: "View our terms and conditions",
+                                action: { openURL("https://loci.app/terms") }
+                            )
+                            
+                            SettingsRow(
+                                icon: "hand.raised",
+                                title: "Privacy Policy",
+                                subtitle: "Read our privacy policy",
+                                action: { openURL("https://loci.app/privacy") }
+                            )
+                            
+                            SettingsRow(
+                                icon: "questionmark.circle",
+                                title: "Support",
+                                subtitle: "Get help with Loci",
+                                action: { openURL("mailto:support@loci.app") }
+                            )
+                        }
+                        
+                        // Sign Out Button
+                        Button(action: { showingSignOutAlert = true }) {
+                            Text("Sign Out")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.red)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color.white.opacity(0.1))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
+                        
+                        Spacer(minLength: 40)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -823,9 +987,73 @@ struct SettingsView: View {
                     Button("Done") {
                         dismiss()
                     }
-                    .foregroundColor(LociTheme.Colors.secondaryHighlight)
+                    .foregroundColor(.blue)
                 }
             }
+        }
+        .onAppear {
+            checkNotificationStatus()
+        }
+        .onChange(of: privacyManager.privacySettings.shareLocation) { _ in
+            privacyManager.updatePrivacySettings(privacyManager.privacySettings)
+        }
+        .onChange(of: privacyManager.privacySettings.shareListeningActivity) { _ in
+            privacyManager.updatePrivacySettings(privacyManager.privacySettings)
+        }
+        .onChange(of: privacyManager.privacySettings.allowFriendRequests) { _ in
+            privacyManager.updatePrivacySettings(privacyManager.privacySettings)
+        }
+        .onChange(of: privacyManager.privacySettings.showOnlineStatus) { _ in
+            privacyManager.updatePrivacySettings(privacyManager.privacySettings)
+        }
+        .onChange(of: notificationsEnabled) { newValue in
+            if newValue {
+                notificationManager.requestPermissions()
+            }
+        }
+        .alert("Sign Out", isPresented: $showingSignOutAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out", role: .destructive) {
+                do {
+                    try firebaseManager.signOut()
+                } catch {
+                    print("Error signing out: \(error)")
+                }
+            }
+        } message: {
+            Text("Are you sure you want to sign out?")
+        }
+        .alert("Delete All Data", isPresented: $showingDeleteAccountAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    await privacyManager.deleteAllUserData()
+                    try? firebaseManager.signOut()
+                }
+            }
+        } message: {
+            Text("This will permanently delete all your Loci data including session history, imports, and preferences. This action cannot be undone.")
+        }
+        .sheet(isPresented: $showingPrivacyExplanation) {
+            PrivacyExplanationView()
+        }
+        .sheet(isPresented: $showingDataExportSheet) {
+            DataExportView()
+                .environmentObject(dataStore)
+        }
+    }
+    
+    private func checkNotificationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                notificationsEnabled = settings.authorizationStatus == .authorized
+            }
+        }
+    }
+    
+    private func openURL(_ urlString: String) {
+        if let url = URL(string: urlString) {
+            UIApplication.shared.open(url)
         }
     }
 }
@@ -2295,6 +2523,7 @@ struct SpotifyImportHeroCard: View {
     let building: String?
     @Binding var showingImportSheet: Bool
     @EnvironmentObject var spotifyManager: SpotifyManager
+    @EnvironmentObject var locationManager: LocationManager
     @EnvironmentObject var dataStore: DataStore
     
     private var locationDisplayText: String {
@@ -2380,16 +2609,11 @@ struct SpotifyImportHeroCard: View {
         .padding(LociTheme.Spacing.large)
         .lociCard()
         .sheet(isPresented: $showingImportSheet) {
-            if dataStore.designatedLocation != nil {
-                StreamlinedSpotifyImportView()
-                    .environmentObject(spotifyManager)
-                    .environmentObject(dataStore)
-            } else {
-                EnhancedSpotifyImportView()
-                    .environmentObject(spotifyManager)
-                    .environmentObject(dataStore)
-                    .environmentObject(LocationManager.shared)
-            }
+            SpotifyImportView()
+                .environmentObject(spotifyManager)
+                .environmentObject(locationManager)
+                .environmentObject(dataStore)
+                .environmentObject(ReverseGeocoding.shared)
         }
     }
 }
@@ -3052,5 +3276,425 @@ struct LocationPickerView: View {
                 dismiss()
             }
         }
+    }
+}
+
+// MARK: - Settings Components
+
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let content: Content
+    
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+            
+            VStack(spacing: 1) {
+                content
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
+    }
+}
+
+struct SettingsRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+    var isDestructive: Bool = false
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(isDestructive ? .red : .blue)
+                    .frame(width: 24)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(isDestructive ? .red : .white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text(subtitle)
+                        .font(.system(size: 14))
+                        .foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(Color.clear)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct SettingsToggleRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text(subtitle)
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            Toggle("", isOn: $isOn)
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+    }
+}
+
+// MARK: - Privacy Explanation View
+
+struct PrivacyExplanationView: View {
+    @Environment(\.dismiss) var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.05, green: 0.05, blue: 0.1),
+                        Color(red: 0.1, green: 0.05, blue: 0.15)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        // Header
+                        VStack(alignment: .leading, spacing: 16) {
+                            Image(systemName: "shield.checkered")
+                                .font(.system(size: 48))
+                                .foregroundColor(.blue)
+                            
+                            Text("Your Privacy Matters")
+                                .font(.system(size: 28, weight: .bold))
+                                .foregroundColor(.white)
+                            
+                            Text("Loci is designed with privacy at its core. Here's how we protect your data:")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        // Location Privacy
+                        PrivacyPointCard(
+                            icon: "location.circle",
+                            title: "Location is Optional",
+                            description: "You can manually select your location instead of using GPS. Like dating apps, you control exactly what location information you share.",
+                            points: [
+                                "GPS is never required",
+                                "Manual location selection available",
+                                "You choose the precision level",
+                                "Location data stays on your device by default"
+                            ]
+                        )
+                        
+                        // Music Privacy
+                        PrivacyPointCard(
+                            icon: "music.note.list",
+                            title: "Music Data Protection",
+                            description: "Your listening history is anonymized and encrypted. Only you see the full details.",
+                            points: [
+                                "Data is anonymized before sharing",
+                                "Only trends are shared, not full history",
+                                "You control what music info is visible",
+                                "Full listening data stays private"
+                            ]
+                        )
+                        
+                        // Data Control
+                        PrivacyPointCard(
+                            icon: "hand.raised",
+                            title: "You're in Control",
+                            description: "You decide what to share, when to share it, and with whom.",
+                            points: [
+                                "Granular privacy controls",
+                                "Export your data anytime",
+                                "Delete everything instantly",
+                                "No hidden data collection"
+                            ]
+                        )
+                        
+                        // Bottom note
+                        VStack(spacing: 12) {
+                            Text("Questions?")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                            
+                            Button("Contact Support") {
+                                if let url = URL(string: "mailto:privacy@loci.app") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 20)
+                        
+                        Spacer(minLength: 40)
+                    }
+                    .padding(24)
+                }
+            }
+            .navigationTitle("Privacy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(.blue)
+                }
+            }
+        }
+    }
+}
+
+struct PrivacyPointCard: View {
+    let icon: String
+    let title: String
+    let description: String
+    let points: [String]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 24))
+                    .foregroundColor(.blue)
+                
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            
+            Text(description)
+                .font(.system(size: 14))
+                .foregroundColor(.gray)
+            
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(points, id: \.self) { point in
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.green)
+                        
+                        Text(point)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+}
+
+// MARK: - Data Export View
+
+struct DataExportView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var dataStore: DataStore
+    @StateObject private var privacyManager = PrivacyManager.shared
+    @State private var isExporting = false
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.05, green: 0.05, blue: 0.1),
+                        Color(red: 0.1, green: 0.05, blue: 0.15)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 32) {
+                    VStack(spacing: 16) {
+                        Image(systemName: "square.and.arrow.up.circle")
+                            .font(.system(size: 64))
+                            .foregroundColor(.blue)
+                        
+                        Text("Export Your Data")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("Download all your Loci data including sessions, imports, and preferences as a JSON file.")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    
+                    VStack(spacing: 16) {
+                        DataExportRow(
+                            title: "Session History",
+                            count: dataStore.sessionHistory.count,
+                            icon: "clock.arrow.circlepath"
+                        )
+                        
+                        DataExportRow(
+                            title: "Spotify Imports",
+                            count: dataStore.importBatches.count,
+                            icon: "square.and.arrow.down"
+                        )
+                        
+                        DataExportRow(
+                            title: "Privacy Settings",
+                            count: 1,
+                            icon: "shield.checkered"
+                        )
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: exportData) {
+                        HStack {
+                            if isExporting {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                Text("Exporting...")
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Export My Data")
+                            }
+                        }
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(.blue)
+                        .cornerRadius(16)
+                    }
+                    .disabled(isExporting)
+                    .padding(.horizontal, 20)
+                }
+                .padding(24)
+            }
+            .navigationTitle("Export Data")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.blue)
+                }
+            }
+        }
+    }
+    
+    private func exportData() {
+        isExporting = true
+        
+        Task {
+            let exportData = await privacyManager.exportUserData()
+            
+            DispatchQueue.main.async {
+                let jsonData = try? JSONEncoder().encode(exportData)
+                let jsonString = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "Export failed"
+                
+                let activityController = UIActivityViewController(
+                    activityItems: [jsonString],
+                    applicationActivities: nil
+                )
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let window = windowScene.windows.first {
+                    window.rootViewController?.present(activityController, animated: true)
+                }
+                
+                isExporting = false
+                dismiss()
+            }
+        }
+    }
+}
+
+struct DataExportRow: View {
+    let title: String
+    let count: Int
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
+            
+            Spacer()
+            
+            Text("\(count)")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.1))
+        )
     }
 }
