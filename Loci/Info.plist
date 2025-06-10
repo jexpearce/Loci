@@ -9,112 +9,120 @@
 		<string>processing</string>
 		<string>audio</string>
 	</array>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>$(DEVELOPMENT_LANGUAGE)</string>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>com.jexpearce.Loci.spotify</string>
-    <key>CFBundlePackageType</key>
-    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSRequiresIPhoneOS</key>
-    <true/>
-    
-    <!-- URL Schemes for Spotify OAuth Callback and Google Sign-In -->
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>loci</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>com.googleusercontent.apps.773590397999-8rrkoj9e0op14ijngl9h7j0umipkujh6</string>
-            </array>
-        </dict>
-    </array>
-    
-    <!-- Location Permissions -->
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Loci tracks your music listening sessions tied to your location to create local music charts and connect you with others who share your taste. Location data is only collected during active sessions that you start.</string>
-    
-    <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Loci needs access to your location to associate your music with the buildings and areas you visit during tracking sessions.</string>
-    
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Loci needs background location access to continue tracking your music sessions even when the app is in the background. This allows for seamless session tracking without keeping the app open.</string>
-    
-    <!-- Background Task Identifiers -->
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array>
-        <string>com.loci.sessionUpdate</string>
-    </array>
-    
-    <!-- App Transport Security for Spotify API -->
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSExceptionDomains</key>
-        <dict>
-            <key>spotify.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-                <key>NSExceptionRequiresForwardSecrecy</key>
-                <true/>
-            </dict>
-        </dict>
-    </dict>
-    
-    <!-- UI Configuration -->
-    <key>UILaunchStoryboardName</key>
-    <string>LaunchScreen</string>
-    <key>UIRequiredDeviceCapabilities</key>
-    <array>
-        <string>armv7</string>
-        <string>location-services</string>
-        <string>gps</string>
-    </array>
-    <key>UISupportedInterfaceOrientations~iphone</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-    </array>
-    <key>UISupportedInterfaceOrientations~ipad</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-        <string>UIInterfaceOrientationPortraitUpsideDown</string>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
-    
-    <!-- Status Bar -->
-    <key>UIStatusBarStyle</key>
-    <string>UIStatusBarStyleLightContent</string>
-    <key>UIViewControllerBasedStatusBarAppearance</key>
-    <false/>
-    
-    <!-- App Icon -->
-    <key>CFBundleIcons</key>
-    <dict>
-        <key>CFBundlePrimaryIcon</key>
-        <dict>
-            <key>CFBundleIconFiles</key>
-            <array>
-                <string>AppIcon</string>
-            </array>
-        </dict>
-    </dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>com.jexpearce.Loci.spotify</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	
+	<!-- App Icon -->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
+	
+	<!-- URL Schemes for Spotify OAuth Callback and Google Sign-In -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>loci</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.773590397999-8rrkoj9e0op14ijngl9h7j0umipkujh6</string>
+			</array>
+		</dict>
+	</array>
+	
+	<!-- Location Permissions -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Loci tracks your music listening sessions tied to your location to create local music charts and connect you with others who share your taste. Location data is only collected during active sessions that you start.</string>
+	
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Loci needs access to your location to associate your music with the buildings and areas you visit during tracking sessions.</string>
+	
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Loci needs background location access to continue tracking your music sessions even when the app is in the background. This allows for seamless session tracking without keeping the app open.</string>
+	
+	<!-- Apple Music Access -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Loci accesses your Apple Music library to enhance music discovery and provide personalized recommendations based on your listening history and location data.</string>
+	
+	<!-- Background Task Identifiers -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.loci.sessionUpdate</string>
+	</array>
+	
+	<!-- App Transport Security for Spotify API -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>spotify.com</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSExceptionRequiresForwardSecrecy</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+	
+	<!-- UI Configuration -->
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+		<string>location-services</string>
+		<string>gps</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~iphone</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	
+	<!-- Status Bar -->
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 </dict>
 </plist>
