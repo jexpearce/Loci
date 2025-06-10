@@ -464,6 +464,25 @@ struct User: Codable, Identifiable {
         self.privacySettings = privacySettings
         self.musicPreferences = musicPreferences
     }
+    
+    // Convert User to UserProfile for friend search
+    func toUserProfile() -> UserProfile {
+        return UserProfile(
+            id: id,
+            displayName: displayName,
+            username: username,
+            email: email,
+            spotifyConnected: spotifyUserId != nil,
+            joinedDate: joinedDate,
+            totalSessions: 0, // Default values since we don't have this data
+            totalTracks: 0,
+            favoriteLocations: [],
+            topGenres: [],
+            sessionModePreference: nil,
+            privacyLevel: "friends",
+            profileImageURL: profileImageURL
+        )
+    }
 }
 
 // MARK: - Session Privacy

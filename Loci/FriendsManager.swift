@@ -41,16 +41,27 @@ class FriendsManager: ObservableObject {
                 guard let self = self else { return }
                 
                 if let error = error {
+                    print("❌ Friends listener error: \(error)")
                     self.errorMessage = error.localizedDescription
                     return
                 }
                 
-                guard let documents = snapshot?.documents else { return }
+                guard let documents = snapshot?.documents else { 
+                    print("📋 No friends documents found")
+                    return 
+                }
+                
+                print("👥 Found \(documents.count) friend documents")
                 
                 Task { @MainActor in
                     self.friends = documents.compactMap { document in
-                        try? Firestore.Decoder().decode(Friend.self, from: document.data())
+                        let friend = try? Firestore.Decoder().decode(Friend.self, from: document.data())
+                        if let friend = friend {
+                            print("  - Friend: \(friend.friendId)")
+                        }
+                        return friend
                     }
+                    print("✅ Total friends loaded: \(self.friends.count)")
                 }
             }
         
@@ -241,7 +252,10 @@ class FriendsManager: ObservableObject {
             .getDocuments()
         
         return snapshot.documents.compactMap { document in
-            try? Firestore.Decoder().decode(UserProfile.self, from: document.data())
+            if let user = try? Firestore.Decoder().decode(User.self, from: document.data()) {
+                return user.toUserProfile()
+            }
+            return nil
         }
     }
     
@@ -252,7 +266,10 @@ class FriendsManager: ObservableObject {
             .getDocuments()
         
         guard let document = snapshot.documents.first else { return nil }
-        return try Firestore.Decoder().decode(UserProfile.self, from: document.data())
+        if let user = try? Firestore.Decoder().decode(User.self, from: document.data()) {
+            return user.toUserProfile()
+        }
+        return nil
     }
     
     func searchUsersByUsername(username: String) async throws -> UserProfile? {
@@ -264,7 +281,10 @@ class FriendsManager: ObservableObject {
             .getDocuments()
         
         guard let document = snapshot.documents.first else { return nil }
-        return try Firestore.Decoder().decode(UserProfile.self, from: document.data())
+        if let user = try? Firestore.Decoder().decode(User.self, from: document.data()) {
+            return user.toUserProfile()
+        }
+        return nil
     }
     
     // MARK: - Friend Activity
