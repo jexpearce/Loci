@@ -88,10 +88,20 @@ struct OnboardingView: View {
                     // Next/Skip button
                     if currentPage < 4 {
                         HStack(spacing: 20) {
-                            if currentPage < 3 {
+                            if currentPage < 2 || (currentPage == 2 && spotifyManager.isAuthenticated) {
                                 Button("Next") {
                                     withAnimation(.easeInOut(duration: 0.3)) {
                                         currentPage += 1
+                                    }
+                                }
+                                .foregroundColor(LociTheme.Colors.primaryAction)
+                                .font(.system(size: 16, weight: .medium))
+                            }
+                            
+                            if currentPage == 3 {
+                                Button("Next") {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        currentPage = 4
                                     }
                                 }
                                 .foregroundColor(LociTheme.Colors.primaryAction)
@@ -301,8 +311,10 @@ struct OnboardingLocationPage: View {
     let authStatus: CLAuthorizationStatus
     let onRequestPermission: () -> Void
     
+    @State private var showingPermissionStep = false
+    
     var body: some View {
-        VStack(spacing: 40) {
+        VStack(spacing: 30) {
             Spacer()
             
             Image(systemName: "location.circle.fill")
@@ -310,58 +322,172 @@ struct OnboardingLocationPage: View {
                 .foregroundColor(LociTheme.Colors.primaryAction)
             
             VStack(spacing: 16) {
-                Text("Enable Location")
+                Text("Location Information")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(LociTheme.Colors.mainText)
                 
-                Text("We use your location to tag your music and show you what's trending nearby")
+                Text("Location data collection is entirely optional. You have three options:")
                     .font(.system(size: 16))
                     .foregroundColor(LociTheme.Colors.subheadText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 32)
             }
             
-            VStack(spacing: 20) {
-                OnboardingPrivacyPoint(
-                    icon: "lock.shield.fill",
-                    text: "Your location is never shared without permission"
-                )
-                
-                OnboardingPrivacyPoint(
-                    icon: "battery.100",
-                    text: "Smart tracking minimizes battery usage"
-                )
-            }
-            .padding(.horizontal, 40)
-            
-            if authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Location Enabled")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.green)
+            if !showingPermissionStep {
+                // Privacy information step
+                VStack(spacing: 20) {
+                    OnboardingLocationOption(
+                        icon: "location.slash",
+                        iconColor: LociTheme.Colors.subheadText,
+                        title: "No Location",
+                        description: "Use the app without any location features"
+                    )
+                    
+                    OnboardingLocationOption(
+                        icon: "location",
+                        iconColor: LociTheme.Colors.secondaryHighlight,
+                        title: "Manual Location",
+                        description: "Manually select your location with your preferred level of precision"
+                    )
+                    
+                    OnboardingLocationOption(
+                        icon: "location.fill",
+                        iconColor: LociTheme.Colors.primaryAction,
+                        title: "Automatic Location",
+                        description: "Allow GPS tracking with configurable precision levels (exact, building, neighborhood, or city level)"
+                    )
                 }
-                .padding()
-                .background(Color.green.opacity(0.1))
-                .cornerRadius(12)
-            } else {
-                Button(action: onRequestPermission) {
-                    HStack {
-                        Image(systemName: "location.fill")
-                        Text("Enable Location")
+                .padding(.horizontal, 32)
+                
+                VStack(spacing: 16) {
+                    Text("How We Use Your Information")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    VStack(spacing: 12) {
+                        OnboardingPrivacyPoint(
+                            icon: "gear",
+                            text: "Run the app and its features"
+                        )
+                        
+                        OnboardingPrivacyPoint(
+                            icon: "chart.bar.fill",
+                            text: "Show you music trends in your area"
+                        )
+                        
+                        OnboardingPrivacyPoint(
+                            icon: "person.2.fill",
+                            text: "Match you with people who have similar music taste"
+                        )
+                        
+                        OnboardingPrivacyPoint(
+                            icon: "trophy.fill",
+                            text: "Create leaderboards and competitions"
+                        )
+                        
+                        OnboardingPrivacyPoint(
+                            icon: "arrow.up.circle.fill",
+                            text: "Improve the app"
+                        )
                     }
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 32)
+                
+                // Privacy Policy Link
+                Link(destination: URL(string: "https://locii.netlify.app/?page=privacy")!) {
+                    HStack {
+                        Image(systemName: "doc.text")
+                        Text("Read our Privacy Policy")
+                    }
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(LociTheme.Colors.primaryAction)
                     .padding()
-                    .background(LociTheme.Colors.primaryAction)
-                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(LociTheme.Colors.primaryAction, lineWidth: 1)
+                    )
                 }
                 .padding(.horizontal, 40)
+                
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showingPermissionStep = true
+                    }
+                }) {
+                    Text("Continue")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(LociTheme.Colors.primaryAction)
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal, 40)
+                
+            } else {
+                // Permission request step
+                VStack(spacing: 20) {
+                    Text("Enable Location Tracking")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(LociTheme.Colors.mainText)
+                    
+                    Text("We'll now request location permission from iOS. You can choose to allow or deny this request.")
+                        .font(.system(size: 16))
+                        .foregroundColor(LociTheme.Colors.subheadText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    
+                    OnboardingPrivacyPoint(
+                        icon: "lock.shield.fill",
+                        text: "Your location is never shared without your explicit permission"
+                    )
+                    
+                    OnboardingPrivacyPoint(
+                        icon: "battery.100",
+                        text: "Smart tracking minimizes battery usage"
+                    )
+                }
+                .padding(.horizontal, 40)
+                
+                if authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("✅ Location Enabled")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.green)
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(12)
+                } else {
+                    VStack(spacing: 16) {
+                        Button(action: onRequestPermission) {
+                            HStack {
+                                Image(systemName: "location.fill")
+                                Text("Request Location Permission")
+                            }
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(LociTheme.Colors.primaryAction)
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 40)
+                        
+                        Button(action: {
+                            // Skip location for now - user can enable later in settings
+                        }) {
+                            Text("Skip for Now")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(LociTheme.Colors.subheadText)
+                        }
+                        .padding(.horizontal, 40)
+                    }
+                }
             }
             
-            Spacer()
             Spacer()
         }
     }
@@ -501,5 +627,37 @@ struct OnboardingPrivacyPoint: View {
             
             Spacer()
         }
+    }
+}
+
+struct OnboardingLocationOption: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(iconColor)
+                .frame(width: 40)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(LociTheme.Colors.mainText)
+                
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(LociTheme.Colors.subheadText)
+                    .multilineTextAlignment(.leading)
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .background(LociTheme.Colors.cardBackground.opacity(0.3))
+        .cornerRadius(12)
     }
 }

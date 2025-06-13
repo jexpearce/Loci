@@ -61,9 +61,7 @@ struct LociApp: App {
     }
     
     private func setupApp() {
-        // Request location permissions on first launch
-        locationManager.requestPermissions()
-        
+        // Location permissions are now handled during onboarding
         // Setup any other initial configurations
         print("🎵 Loci: App launched with Firebase")
     }

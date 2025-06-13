@@ -180,6 +180,28 @@ extension SpotifyManager: ASWebAuthenticationPresentationContextProviding {
     }
 }
 
+// MARK: - Spotify Errors
+
+enum SpotifyError: Error {
+    case notAuthenticated
+    case tokenExpired
+    case networkError
+    case invalidResponse
+    
+    var localizedDescription: String {
+        switch self {
+        case .notAuthenticated:
+            return "Please reconnect your Spotify account"
+        case .tokenExpired:
+            return "Spotify session expired"
+        case .networkError:
+            return "Network connection error"
+        case .invalidResponse:
+            return "Invalid response from Spotify"
+        }
+    }
+}
+
 // MARK: - HTTP Error for Retry Logic
 
 struct HTTPError: Error {
@@ -236,9 +258,43 @@ class SpotifyManager: NSObject, ObservableObject {
 
     private override init() {
         super.init()
-        // Attempt to read existing tokens to set isAuthenticated
-        if let _ = try? KeychainHelper.read(service: service, account: "accessToken") {
-            self.isAuthenticated = true
+        // Check if we have valid tokens on app launch
+        checkAuthenticationStatus()
+    }
+    
+    private func checkAuthenticationStatus() {
+        // Check if we have both access and refresh tokens
+        guard let _ = try? KeychainHelper.read(service: service, account: "accessToken"),
+              let _ = try? KeychainHelper.read(service: service, account: "refreshToken") else {
+            self.isAuthenticated = false
+            return
+        }
+        
+        // Validate token expiry
+        if let expiryData = try? KeychainHelper.read(service: service, account: "expiryDate"),
+           let expiryDate = try? JSONDecoder().decode(Date.self, from: expiryData) {
+            
+            // If token expired more than 6 months ago, likely refresh token is also expired
+            if Date().timeIntervalSince(expiryDate) > 15552000 { // 6 months
+                print("🔄 Tokens likely expired, requiring re-authentication")
+                self.isAuthenticated = false
+                clearAllTokens()
+                return
+            }
+        }
+        
+        self.isAuthenticated = true
+    }
+    
+    private func clearAllTokens() {
+        let keys = ["accessToken", "refreshToken", "expiryDate"]
+        for key in keys {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key
+            ]
+            SecItemDelete(query as CFDictionary)
         }
     }
 
@@ -343,15 +399,29 @@ class SpotifyManager: NSObject, ObservableObject {
             
             // Token is expired or about to expire, try to refresh
             print("🔄 Access token expired, attempting refresh...")
-            try await refreshAccessToken()
-            
-            // Get the new token
-            if let newTokenData = try? KeychainHelper.read(service: service, account: "accessToken"),
-               let newToken = String(data: newTokenData, encoding: .utf8) {
-                return newToken
+            do {
+                try await refreshAccessToken()
+                
+                // Get the new token
+                if let newTokenData = try? KeychainHelper.read(service: service, account: "accessToken"),
+                   let newToken = String(data: newTokenData, encoding: .utf8) {
+                    return newToken
+                }
+            } catch {
+                print("❌ Token refresh failed: \(error)")
+                // Clear tokens and require re-authentication
+                clearAllTokens()
+                DispatchQueue.main.async {
+                    self.isAuthenticated = false
+                }
+                throw SpotifyError.notAuthenticated
             }
         }
         
+        // No valid tokens found
+        DispatchQueue.main.async {
+            self.isAuthenticated = false
+        }
         throw SpotifyError.notAuthenticated
     }
 

@@ -860,11 +860,6 @@ struct SpotifyImportTrack: Identifiable, Codable, SpotifyTrackProtocol {
     }
 }
 
-enum SpotifyError: Error {
-    case notAuthenticated
-    case invalidResponse
-    case networkError
-}
 
 // MARK: - Import Batch Entity for SwiftData
 

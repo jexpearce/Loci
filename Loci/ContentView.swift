@@ -3101,7 +3101,7 @@ struct LocationSelectionSection: View {
                 
                 if dataStore.designatedLocation != nil {
                     Button("Change") {
-                        showingLocationPicker = true
+                        dataStore.clearDesignatedLocation()
                     }
                     .font(.system(size: 14))
                     .foregroundColor(LociTheme.Colors.secondaryHighlight)
